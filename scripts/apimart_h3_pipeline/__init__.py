@@ -8,6 +8,15 @@ from .vision import DashScopeVisionRefiner, observe_stage_output
 from .image_editor import GrsaiImageEditor
 from .bridge import *
 from .artifacts import *
-from .runner import main, parse_args
 
-__all__ = [name for name in globals() if not name.startswith("_")]
+__all__ = [name for name in globals() if not name.startswith("_")] + ["main", "parse_args"]
+
+
+def __getattr__(name: str):
+    """Load the orchestration module lazily for ``python -m`` compatibility."""
+
+    if name in {"main", "parse_args"}:
+        from . import runner
+
+        return getattr(runner, name)
+    raise AttributeError(name)
