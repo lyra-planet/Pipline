@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apimart-h3-pipeline"
+version = "1.0.0"
+description = "Portable, resumable MiniMax-H3 sequential video editing pipeline"
+requires-python = ">=3.10"
+dependencies = ["Pillow>=9.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+apimart-h3-sequential = "apimart_h3_pipeline.runner:main"
+
+[tool.setuptools]
+package-dir = {"" = "scripts"}
+packages = ["apimart_h3_pipeline"]
+py-modules = ["run_apimart_minimax_h3", "vetra_failure_repair"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["scripts", "src"]
