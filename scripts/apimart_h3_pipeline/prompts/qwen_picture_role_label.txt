@@ -1,0 +1,1 @@
+<Picture ${picture_index}> = ${role_name}, source frame ${source_frame}. This is the edited reference image for that temporal anchor:

@@ -1,0 +1,4 @@
+Atomic edit to inspect:
+${raw_prompt}
+
+The attached images are five uniformly sampled frames from the generated output, in temporal order.

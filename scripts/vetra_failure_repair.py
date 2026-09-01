@@ -11,7 +11,28 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+try:
+    from apimart_h3_pipeline.prompt_catalog import load_repair_clauses
+except (ImportError, ModuleNotFoundError):
+    # ``vetra_failure_repair.py`` is also loaded directly by legacy tests and
+    # launchers.  Keep that import mode independent from package initialization.
+    import json
+
+    def load_repair_clauses() -> dict[str, str]:
+        path = Path(__file__).with_name("apimart_h3_pipeline") / "prompts" / "repair_clauses.json"
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"could not load repair clauses from {path}") from error
+        if not isinstance(value, dict) or any(
+            not isinstance(key, str) or not key.strip() or not isinstance(clause, str) or not clause.strip()
+            for key, clause in value.items()
+        ):
+            raise RuntimeError("repair_clauses.json must map action names to non-empty strings")
+        return {key: clause.strip() for key, clause in value.items()}
 
 
 FAILURE_TYPES = frozenset(
@@ -92,31 +113,7 @@ _ACTION_BY_FAILURE = {
     "composition_weak": "strengthen_composition",
 }
 
-_CLAUSE_BY_ACTION = {
-    "strengthen_edit": (
-        "Make the requested current edit clearly visible across the sequence. "
-        "Apply only this current edit."
-    ),
-    "strengthen_identity_preservation": (
-        "Preserve the identity, count, role, face, body, clothing, and all unedited appearance "
-        "of existing people."
-    ),
-    "strengthen_previous_stage_preservation": (
-        "Preserve all edits already confirmed before this stage, then apply only the current edit."
-    ),
-    "use_three_anchor": (
-        "Use the start, primary, and end references only as temporal appearance anchors; "
-        "preserve the source video's motion and progression."
-    ),
-    "strengthen_motion": (
-        "Make the requested motion visibly clear with its stated type, direction, amplitude, and speed; "
-        "do not introduce a different camera or object motion."
-    ),
-    "strengthen_composition": (
-        "Make the requested spatial or compositional change clearly visible at its stated target position; "
-        "preserve all unrequested layout."
-    ),
-}
+_CLAUSE_BY_ACTION = load_repair_clauses()
 
 _MOTION_RE = re.compile(
     r"\b(camera|pan|push[- ]?in|pull[- ]?out|zoom|dolly|tilt|orbit|tracking|track(?:ing)? shot|"

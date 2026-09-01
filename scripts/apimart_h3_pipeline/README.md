@@ -13,9 +13,15 @@ or use the `apimart-h3-sequential` console command.
 | `media.py` | `ffprobe`, letterbox/crop normalization, frame extraction, sidecars |
 | `policy.py` | static/video-only reference policy and prompt/tag validation |
 | `repair.py` | public boundary for the closed-set VETRA failure repair policy |
-| `vision.py` | DashScope Qwen-VL refinement and five-frame success gate |
+| `vision.py` | Stable public API for Qwen-VL refinement and observation |
+| `vision_client.py` | DashScope transport, image encoding, and multimodal payloads |
+| `vision_refiner.py` | Reference planning, H3 prompt composition, and success-gate decisions |
 | `image_editor.py` | GRSAI asynchronous image-edit client |
-| `bridge.py` | parent frames, image references, uploads, and H3 prompt assembly |
+| `bridge.py` | Stable public bridge API retained for existing launchers |
+| `bridge_helpers.py` | task loading, uploads, reference plans, and deterministic prompt contracts |
+| `bridge_execution.py` | stage bridge coordinator and durable bridge artifact handling |
+| `prompt_catalog.py` | package-resource loading and template rendering |
+| `prompts/` | reviewable Qwen/H3/repair prompt templates and the repair clause table |
 | `artifacts.py` | request resume, attempt archival, and manifest records |
 | `runner.py` | stage lifecycle, immutable parent handling, retry routing, CLI |
 

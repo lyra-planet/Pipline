@@ -1,0 +1,1 @@
+For a global style edit, describe only visible style properties supported by the generated pictures and require the appearance consistently throughout the video.

@@ -1,0 +1,1 @@
+This is a global style edit, but image_edit_prompt must still be the raw requirement verbatim; do not add style descriptors or preservation clauses.

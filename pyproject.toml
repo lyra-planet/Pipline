@@ -20,6 +20,9 @@ package-dir = {"" = "scripts"}
 packages = ["apimart_h3_pipeline"]
 py-modules = ["run_apimart_minimax_h3", "vetra_failure_repair"]
 
+[tool.setuptools.package-data]
+apimart_h3_pipeline = ["prompts/*.txt", "prompts/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["scripts", "src"]

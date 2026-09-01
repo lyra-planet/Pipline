@@ -26,7 +26,13 @@ def test_all_pipeline_boundaries_import_without_provider_calls() -> None:
         "apimart_h3_pipeline.vision",
         "apimart_h3_pipeline.image_editor",
         "apimart_h3_pipeline.bridge",
+        "apimart_h3_pipeline.bridge_helpers",
+        "apimart_h3_pipeline.bridge_execution",
         "apimart_h3_pipeline.artifacts",
+        "apimart_h3_pipeline.cli",
+        "apimart_h3_pipeline.prompt_catalog",
+        "apimart_h3_pipeline.vision_client",
+        "apimart_h3_pipeline.vision_refiner",
         "apimart_h3_pipeline.runner",
     )
     for name in modules:

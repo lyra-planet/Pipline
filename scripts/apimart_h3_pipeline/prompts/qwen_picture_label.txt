@@ -1,0 +1,1 @@
+<Picture ${picture_index}> generated reference image:

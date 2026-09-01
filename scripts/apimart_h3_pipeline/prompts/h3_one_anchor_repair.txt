@@ -1,0 +1,1 @@
+Use <Picture 1> as the visual appearance target throughout the video. Preserve the scene from <Video 1>; use <Video 1> for motion and temporal progression. Apply only this edit to <Video 1>: ${requirement}.

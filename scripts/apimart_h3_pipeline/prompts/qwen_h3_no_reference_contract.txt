@@ -1,0 +1,1 @@
+No picture is attached for this stage. h3_prompt must contain the exact tag <Video 1> and must not contain any <Picture N> tag. Put <Video 1> inline in the sentence that describes the requested action, camera, temporal, or audio edit.

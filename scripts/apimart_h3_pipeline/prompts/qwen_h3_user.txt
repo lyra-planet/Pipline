@@ -1,0 +1,4 @@
+Raw atomic edit requirement:
+${raw_prompt}
+
+First inspect the five parent-video frames, then the generated reference pictures, and author the final H3 prompt using only that evidence. If pictures are attached, include the temporal anchor mapping in the h3_prompt itself, not only in this message.

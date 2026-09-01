@@ -1,0 +1,8 @@
+{
+  "strengthen_edit": "Make the requested current edit clearly visible across the sequence. Apply only this current edit.",
+  "strengthen_identity_preservation": "Preserve the identity, count, role, face, body, clothing, and all unedited appearance of existing people.",
+  "strengthen_previous_stage_preservation": "Preserve all edits already confirmed before this stage, then apply only the current edit.",
+  "use_three_anchor": "Use the start, primary, and end references only as temporal appearance anchors; preserve the source video's motion and progression.",
+  "strengthen_motion": "Make the requested motion visibly clear with its stated type, direction, amplitude, and speed; do not introduce a different camera or object motion.",
+  "strengthen_composition": "Make the requested spatial or compositional change clearly visible at its stated target position; preserve all unrequested layout."
+}

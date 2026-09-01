@@ -1,0 +1,4 @@
+Raw atomic edit requirement:
+${raw_prompt}
+
+The five attached parent-video frames are in temporal order at indices ${frame_indices}.
