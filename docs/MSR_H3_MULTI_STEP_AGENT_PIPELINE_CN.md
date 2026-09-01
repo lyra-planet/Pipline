@@ -809,6 +809,7 @@ runs/task139_minimax_h3_s3_style_reference_20260817/
 | 本地 H3/ComfyUI batch runner | `scripts/run_h3_ref2va_int8_comfy_batch.py` |
 | 本地 INT8 单复杂 prompt baseline | `scripts/run_h3_ref2va_int8_single_complex_baseline.py` |
 | APIMart H3 客户端 | `scripts/run_apimart_minimax_h3.py`（实现位于 `src/apimart_h3_pipeline/providers/apimart.py`） |
+| 本地 MiniMax-H3 客户端 | `src/apimart_h3_pipeline/providers/local.py`（ComfyUI API-format workflow） |
 | APIMart 多阶段执行 | `scripts/run_apimart_minimax_h3_sequential.py`（实现位于 `src/apimart_h3_pipeline/execution/runner.py`） |
 | 本地 H3 + Qwen-VL + 图像桥 | `scripts/run_minimax_h3_adaptive_reference_loop.py` |
 | 原子计划/结构 prompt 编译 | `scripts/compile_h3_ref2va_structured_prompts.py` |
