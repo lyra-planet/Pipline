@@ -31,7 +31,7 @@ Qwen system prompt、user prompt、图片标签、三锚点合同和 repair clau
 闭集，`vetra_failure_repair.py` 只接受其中的 action 和对应原文。
 
 Prompt 改动会自然进入已有的 `bridge.json`、attempt 和 observer 记录，便于审阅
-和复现实验；没有额外的 prompt 指纹、缓存 ID 或运行时配置项。
+和复现实验；没有额外的缓存标识或运行时配置项。
 
 ## 运行边界
 

@@ -126,8 +126,8 @@ def bridge_for_stage(
                     )
                 ):
                     # CTMOAI sd-media objects are durable. Re-uploading them
-                    # on every resume changes the H3 request fingerprint and
-                    # can create a second paid task, so keep the saved URLs.
+                    # on every resume can create a second paid task, so keep
+                    # the saved URLs.
                     return list(image_urls), h3_prompt, bridge
                 if isinstance(local_images, list) and all(
                     isinstance(item, str) and Path(item).is_file() for item in local_images
