@@ -16,6 +16,7 @@ from ..core.repair_policy import RepairValidationError, validate_observation
 from ..core.constants import H3_CLIENT_MODULE, H3_FRAME_COUNT, H3_FPS, H3_CANVAS_WIDTH, H3_CANVAS_HEIGHT
 from ..media import CanvasGeometry, has_audio, is_aligned_video, is_h3_input_video, is_h3_generated_video, materialize_stage_video, read_json, source_canvas_geometry, write_geometry_sidecar
 from ..core.policy import normalized_prompt
+from ..providers.local import LocalH3Client, LocalH3Config
 
 def reusable_h3_video_url(
     state_path: Path,
@@ -48,7 +49,42 @@ def invoke_h3_client(
     video_url: str,
     image_urls: Sequence[str],
     stage_dir: Path,
+    bridge: Mapping[str, Any] | None = None,
 ) -> None:
+    if getattr(args, "h3_backend", "online") == "local":
+        reference_values = bridge.get("reference_images", []) if isinstance(bridge, Mapping) else []
+        if not isinstance(reference_values, list) or not all(isinstance(item, str) for item in reference_values):
+            raise ApimartError("local H3 bridge has invalid reference image paths")
+        workflow_template = getattr(args, "local_workflow_template", None)
+        if workflow_template is not None and not isinstance(workflow_template, Path):
+            workflow_template = Path(str(workflow_template))
+        if workflow_template is None:
+            raise ApimartError("--local-workflow-template is required with --h3-backend local")
+        local_client = LocalH3Client(LocalH3Config(
+            server=getattr(args, "local_server", "http://127.0.0.1:8188"),
+            workflow_template=workflow_template,
+            input_dir=getattr(args, "local_input_dir", None) or args.out_dir / "local_inputs",
+            output_dir=getattr(args, "local_output_dir", None) or args.out_dir / "local_outputs",
+            timeout_seconds=getattr(args, "local_timeout", 21600),
+            poll_seconds=getattr(args, "local_poll_seconds", 15.0),
+        ))
+        print(json.dumps({
+            "event": "stage_start",
+            "backend": "local",
+            "stage": stage["stage_id"],
+            "raw_prompt": stage["prompt"],
+            "h3_prompt": h3_prompt,
+            "reference_image_count": len(reference_values),
+        }, ensure_ascii=False), flush=True)
+        local_client.generate(
+            source_video=Path(video_url),
+            prompt=h3_prompt,
+            reference_images=[Path(item) for item in reference_values],
+            destination=stage_dir / "output.mp4",
+            stage_dir=stage_dir,
+            stage_id=str(stage["stage_id"]),
+        )
+        return
     command = [
         sys.executable, "-m", H3_CLIENT_MODULE, "--env-file", str(args.apimart_env),
         "--request-timeout", str(args.request_timeout), "--poll-seconds", str(args.poll_seconds),
@@ -169,6 +205,7 @@ def archive_stage_attempt(
         shutil.move(str(output), first_output)
     for source, target in (
         (state_path, archive / state_path.name),
+        (stage_dir / "local_task_state.json", archive / "local_task_state.json"),
         (bridge_dir, archive / bridge_dir.name),
         (observation_dir, archive / observation_dir.name),
     ):

@@ -9,6 +9,7 @@ from ..core.constants import (
     DASHSCOPE_DEFAULT_BASE_URL,
     DASHSCOPE_DEFAULT_MODEL,
     DEFAULT_STATIC_REFERENCE_COUNT,
+    LOCAL_H3_DEFAULT_SERVER,
     REFERENCE_IMAGE_COUNTS,
 )
 
@@ -19,7 +20,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--task-id", required=True)
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--media-dir", type=Path, required=True)
-    parser.add_argument("--media-public-base-url", required=True)
+    parser.add_argument(
+        "--media-public-base-url",
+        help="public media URL required by the online backend; local backend uses local files",
+    )
     parser.add_argument(
         "--prepared-initial-video",
         type=Path,
@@ -44,6 +48,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dashscope-model", default=DASHSCOPE_DEFAULT_MODEL)
     parser.add_argument("--dashscope-timeout", type=int, default=120)
     parser.add_argument("--h3-model", default="MiniMax-H3")
+    parser.add_argument(
+        "--h3-backend",
+        choices=("online", "local"),
+        default="online",
+        help="H3 execution backend; local uses a ComfyUI API-format workflow",
+    )
+    parser.add_argument("--local-server", default=os.environ.get("APIMART_H3_LOCAL_SERVER", LOCAL_H3_DEFAULT_SERVER))
+    parser.add_argument(
+        "--local-workflow-template", type=Path,
+        help="API-format ComfyUI workflow JSON; required with --h3-backend local",
+    )
+    parser.add_argument(
+        "--local-input-dir", type=Path,
+        help="ComfyUI input directory shared with the local server; defaults to <out-dir>/local_inputs",
+    )
+    parser.add_argument(
+        "--local-output-dir", type=Path,
+        help="ComfyUI output directory shared with the local server; defaults to <out-dir>/local_outputs",
+    )
+    parser.add_argument("--local-timeout", type=int, default=21600)
+    parser.add_argument("--local-poll-seconds", type=float, default=15.0)
     parser.add_argument("--duration", type=int, default=4)
     parser.add_argument("--resolution", choices=("768P", "2K"), default="768P")
     parser.add_argument("--aspect-ratio", default="16:9")

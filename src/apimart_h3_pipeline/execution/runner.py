@@ -21,12 +21,23 @@ from ..media import CanvasGeometry, geometry_sidecar, has_audio, is_aligned_vide
 from ..core.policy import reference_policy
 from ..providers.vision_refiner import DashScopeVisionRefiner, observe_stage_output
 from ..providers.grsai import GrsaiImageEditor
+from ..providers.local import LocalH3MediaAdapter
 
 from .cli import parse_args
 
 
 def main() -> int:
     args = parse_args()
+    backend = getattr(args, "h3_backend", "online")
+    if backend not in {"online", "local"}:
+        raise ApimartError(f"unsupported H3 backend: {backend}")
+    if backend == "local":
+        workflow_template = getattr(args, "local_workflow_template", None)
+        if workflow_template is not None and not isinstance(workflow_template, Path):
+            workflow_template = Path(str(workflow_template))
+            args.local_workflow_template = workflow_template
+        if workflow_template is None or not workflow_template.is_file():
+            raise ApimartError("--local-workflow-template must name an existing file with --h3-backend local")
     if not 4 <= args.duration <= 15:
         raise ApimartError("duration must be from 4 to 15")
     task = load_task(args.compiled_jobs.resolve(), args.task_id)
@@ -91,16 +102,25 @@ def main() -> int:
     else:
         initial_media = materialize_initial_video(task["source_video"], initial_target, geometry)
     parent = initial_media
-    parent_url = public_url(args.media_public_base_url, parent.name)
+    if backend == "online" and not args.media_public_base_url:
+        raise ApimartError("--media-public-base-url is required with --h3-backend online")
+    parent_url = (
+        public_url(args.media_public_base_url, parent.name)
+        if backend == "online"
+        else str(parent.resolve())
+    )
     if args.dry_run:
         for stage in task["stages"]:
             manifest["stages"].append({"stage": stage["stage_id"], "prompt": stage["prompt"], "policy": reference_policy(stage["prompt"], args.global_style_reference_count)})
         write_json(manifest_path, manifest)
         print(json.dumps({"event": "dry_run", "manifest": str(manifest_path)}, ensure_ascii=False))
         return 0
-    credentials_args = argparse.Namespace(env_file=args.apimart_env, base_url=None)
-    api_key, base_url = resolve_credentials(credentials_args)
-    apimart = ApimartClient(api_key, base_url, args.request_timeout)
+    if backend == "online":
+        credentials_args = argparse.Namespace(env_file=args.apimart_env, base_url=None)
+        api_key, base_url = resolve_credentials(credentials_args)
+        apimart = ApimartClient(api_key, base_url, args.request_timeout)
+    else:
+        apimart = LocalH3MediaAdapter()
     if apimart.is_ctmoai:
         saved_initial_url = manifest.get("initial_video_url")
         if isinstance(saved_initial_url, str) and saved_initial_url.startswith(
@@ -126,6 +146,14 @@ def main() -> int:
         "diagnosis_schema": "qwen_vl_failure_diagnosis_v1",
         "repair_schema": "vetra_failure_repair_v1",
     }
+    manifest["h3_backend"] = backend
+    if backend == "local":
+        manifest["local_h3"] = {
+            "server": args.local_server,
+            "workflow_template": str(args.local_workflow_template.resolve()) if args.local_workflow_template else None,
+            "input_dir": str((args.local_input_dir or args.out_dir / "local_inputs").resolve()),
+            "output_dir": str((args.local_output_dir or args.out_dir / "local_outputs").resolve()),
+        }
     write_json(manifest_path, manifest)
     for index, stage in enumerate(task["stages"]):
         stage_dir = args.out_dir / "stages" / stage["stage_id"]
@@ -220,7 +248,15 @@ def main() -> int:
                         "failed stage output cannot be used as retry input"
                     )
             stage_input_url = stage_parent_url
-            invoke_h3_client(args, stage, h3_prompt, stage_input_url, image_urls, stage_dir)
+            invoke_h3_client(
+                args,
+                stage,
+                h3_prompt,
+                stage_input_url,
+                image_urls,
+                stage_dir,
+                bridge=bridge,
+            )
             if not is_aligned_video(output):
                 raise ApimartError(f"completed stage output is invalid: {output}")
 

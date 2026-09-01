@@ -6,6 +6,7 @@ from .policy import *
 from .repair import *
 from .vision import DashScopeVisionRefiner, observe_stage_output
 from .image_editor import GrsaiImageEditor
+from .providers.local import LocalH3Client, LocalH3Config, LocalH3Error, LocalH3MediaAdapter
 from .bridge import *
 from .artifacts import *
 

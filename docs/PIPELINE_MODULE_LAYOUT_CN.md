@@ -13,7 +13,8 @@
 - `execution/runner.py` 负责命令行参数、阶段生命周期、父视频选择、一次重试和最终产物。
 - `bridge/execution.py` 负责一个 stage 的参考图/H3 bridge 执行与 `bridge.json` 持久化；`bridge/helpers.py`
   负责任务读取、上传、首帧主参考复用、三锚点计划和确定性 repair prompt。
-- `providers/dashscope_client.py` 只负责 DashScope 请求、图片编码和多模态消息中的帧/图片附件；
+- `providers/apimart.py` 负责线上 APIMart H3 请求；`providers/local.py` 负责本地 ComfyUI
+  workflow 提交和输出收集；`providers/dashscope_client.py` 只负责 DashScope 请求、图片编码和多模态消息中的帧/图片附件；
   `providers/vision_refiner.py` 负责 Qwen-VL 的参考规划、H3 prompt 组成和五帧 observer。
 - `providers/grsai.py` 负责 GRSAI 图片编辑；`media/video.py` 负责 ffprobe、帧抽取和视频几何。
 - `core/policy.py` 和 `core/repair_policy.py` 负责闭集策略、标签校验和 stage-local 不变量。

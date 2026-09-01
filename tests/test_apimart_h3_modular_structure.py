@@ -41,6 +41,7 @@ def test_all_pipeline_boundaries_import_without_provider_calls() -> None:
         "apimart_h3_pipeline.prompt_catalog",
         "apimart_h3_pipeline.resources.catalog",
         "apimart_h3_pipeline.providers.apimart",
+        "apimart_h3_pipeline.providers.local",
         "apimart_h3_pipeline.runner",
         "apimart_h3_pipeline.execution.runner",
     )

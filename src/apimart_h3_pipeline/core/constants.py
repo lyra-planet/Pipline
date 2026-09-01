@@ -9,6 +9,7 @@ H3_CLIENT = SCRIPTS_DIR / "run_apimart_minimax_h3.py"
 PROMPT_KEY = "audited_content_only_prompt"
 DASHSCOPE_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 DASHSCOPE_DEFAULT_MODEL = "qwen-vl-plus"
+LOCAL_H3_DEFAULT_SERVER = "http://127.0.0.1:8188"
 BRIDGE_KIND = "apimart_minimax_h3_online_qwen_bridge_v8_raw_image_prompt_video_atomic"
 DEFAULT_STATIC_REFERENCE_COUNT = 1
 GLOBAL_STYLE_REFERENCE_COUNT = 3

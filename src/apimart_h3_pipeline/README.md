@@ -5,6 +5,11 @@ This package is the implementation behind
 thin compatibility entry point; new integrations should import this package
 or use the `apimart-h3-sequential` console command.
 
+H3 generation has two interchangeable provider boundaries: `providers/apimart.py`
+submits hosted MiniMax-H3 requests, while `providers/local.py` submits an
+API-format workflow to a local ComfyUI server.  The stage state machine,
+reference bridge, Observer gate, and repair policy are shared by both modes.
+
 The source layout is deliberately shallow: `core/`, `providers/`, `bridge/`,
 `execution/`, `media/`, and `resources/` are the only responsibility
 subpackages.  This keeps ownership visible without turning every helper into
@@ -21,6 +26,12 @@ another directory.
 | `media/` | `ffprobe`, letterbox/crop normalization, frame extraction, and sidecars |
 | `resources/` | package-resource prompt loading and reviewable prompt templates |
 | root compatibility modules | stable imports such as `apimart_h3_pipeline.vision` |
+
+For local H3, pass `--h3-backend local`, `--local-server`, and
+`--local-workflow-template`, plus the ComfyUI `--local-input-dir` and
+`--local-output-dir` when those directories are not the defaults under the
+run directory.  The workflow graph is adapted by node type, so the package
+does not depend on the node IDs from one particular ComfyUI export.
 
 The package deliberately keeps the control-plane boundary explicit.  A stage
 is executed against one immutable parent video.  A failed output is observed

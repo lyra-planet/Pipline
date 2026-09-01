@@ -6,16 +6,16 @@
 ~~~text
 scripts/run_apimart_minimax_h3_sequential.py
 ~~~
-为准，记录在线 MiniMax-H3 多阶段视频编辑的实际行为。配套的单阶段 API 客户端是
+为准，记录在线和本地 MiniMax-H3 多阶段视频编辑的实际行为。配套的单阶段 API 客户端是
 ~~~text
 scripts/run_apimart_minimax_h3.py
 ~~~
 
 ## 1. 流程定位
 
-该 runner 是“已编译计划 + 在线 H3 生成 + Qwen-VL 观察 + 可选图片参考 + 成功门 + 断点恢复”的执行器。
+该 runner 是“已编译计划 + 可选在线/本地 H3 生成 + Qwen-VL 观察 + 可选图片参考 + 成功门 + 断点恢复”的执行器。
 
-它会读取已经编译好的 compiled-jobs，按 S1、S2、... 固定顺序执行，每个 stage 使用上一个 stage 的视频作为输入。它不会重新规划 MSR、不会自动重排风格 stage、不会运行 Aurora 控制器，也不是本地 ComfyUI 推理。风格阶段是否在最后，取决于输入计划本身。
+它会读取已经编译好的 compiled-jobs，按 S1、S2、... 固定顺序执行，每个 stage 使用上一个 stage 的视频作为输入。它不会重新规划 MSR、不会自动重排风格 stage、不会运行 Aurora 控制器。H3 可以通过 `--h3-backend online` 使用 APIMart，也可以通过 `--h3-backend local` 使用本地 ComfyUI workflow；风格阶段是否在最后，取决于输入计划本身。
 
 ## 2. 默认契约
 
@@ -207,9 +207,9 @@ Picture 1 负责外观和静态变化；Video 1 负责原视频动作、运动�
 Apply only this edit to <Video 1>: <原始 atomic prompt>
 ~~~
 
-## 10. H3 在线生成
+## 10. H3 生成后端
 
-runner 通过 run_apimart_minimax_h3.py 子进程传入：
+线上模式通过 `providers/apimart.py` 子进程传入：
 
 ~~~text
 --prompt <最终 H3 prompt>
@@ -224,6 +224,13 @@ runner 通过 run_apimart_minimax_h3.py 子进程传入：
 APIMart 使用 POST /v1/videos/generations，字段是 video_urls、image_urls、duration。CTMOAI 使用 POST /v1/videos，字段是 reference_videos、images、seconds；16:9 的 768P 明确设置为 1376x768。
 
 CTMOAI 会把初始视频、每轮 stage 视频和参考图片上传到稳定 media store；APIMart 通常使用 media-public-base-url 暴露的视频和图片 URL。H3 POST 只提交一次，相同请求按 task state 恢复，状态 GET 按轮询间隔重试，视频下载支持断点续传。
+
+本地模式通过 `providers/local.py` 向 ComfyUI 的 `/prompt` 提交 API-format
+workflow，并轮询 `/history/{prompt_id}`。runner 将当前 parent video 和 bridge
+生成的参考图复制到 `--local-input-dir`，再从 SaveVideo history 输出复制到
+当前 stage 的 `output.mp4`。local workflow 必须包含一个 H3
+`ReferenceToVideo` 节点、一个 `LoadVideo` 节点和一个 `SaveVideo` 节点；节点按
+`class_type` 发现，模板可以来自不同的 ComfyUI 导出。
 
 ## 11. 五帧成功门、失败诊断和定向修复
 

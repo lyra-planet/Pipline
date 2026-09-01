@@ -102,6 +102,7 @@ MiniMax-H3 输出
 | 三锚点规划 | `three_anchor_reference_plan()` | `middle/end_image_edit_prompt`、`style_reference_frame_index` | 本地确定性元数据；首帧是共享 style master，repair 只在 `style_inconsistency` 等类型触发 |
 | stage 状态机 | `main()`，约 1928 行 | `attempts`、`post_edit_observation` | 诊断、修复、传播闸门 |
 | 在线 H3 请求 | `scripts/run_apimart_minimax_h3.py`（实现位于 `src/apimart_h3_pipeline/providers/apimart.py`） | request/poll/download state | 修复后按变化后的请求字段提交新 task |
+| 本地 H3 请求 | `src/apimart_h3_pipeline/providers/local.py` | ComfyUI workflow、history、local task state | 使用同一 stage prompt/reference，不需要 APIMart key |
 | 现有严格尝试模式 | `scripts/run_preplanned_h3_full_pipeline.py`，约 333-470 行 | attempt manifest、`semantic_failure` | 可借鉴停止传播和 stage attempt 结构 |
 
 ### 2.3 当前 observer 与诊断边界
