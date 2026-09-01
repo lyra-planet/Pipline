@@ -13,14 +13,11 @@ from typing import Any, Mapping, Sequence
 
 from PIL import Image
 
-try:
-    from run_apimart_minimax_h3 import ApimartError, read_env_file
-except ModuleNotFoundError:
-    from ..run_apimart_minimax_h3 import ApimartError, read_env_file
+from .apimart import ApimartError, read_env_file
 
-from .constants import QWEN_CONTEXT_FRAME_INDICES
-from .policy import no_proxy_opener, normalized_prompt
-from .prompt_catalog import render_prompt
+from ..core.policy import no_proxy_opener, normalized_prompt
+from ..core.constants import QWEN_CONTEXT_FRAME_INDICES
+from ..resources.catalog import render_prompt
 
 
 class DashScopeClient:
@@ -128,4 +125,3 @@ class DashScopeClient:
             content.append({"type": "text", "text": label})
             content.append({"type": "image_url", "image_url": {"url": self.image_data_url(reference)}})
         return content
-

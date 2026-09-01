@@ -6,10 +6,7 @@ import re
 import urllib.request
 from typing import Any, Mapping, Sequence
 
-try:
-    from run_apimart_minimax_h3 import ApimartError
-except ModuleNotFoundError:
-    from ..run_apimart_minimax_h3 import ApimartError
+from ..providers.apimart import ApimartError
 
 from .constants import (
     DEFAULT_STATIC_REFERENCE_COUNT, GLOBAL_STYLE_REFERENCE_COUNT, REFERENCE_IMAGE_COUNTS,
@@ -217,4 +214,3 @@ def reference_roles_match_policy(value: Any, reference_count: int) -> bool:
     if not isinstance(value, list):
         return False
     return value == expected_reference_roles(reference_count)
-

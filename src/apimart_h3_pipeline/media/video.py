@@ -9,12 +9,9 @@ from typing import Any, Mapping
 
 from PIL import Image
 
-try:
-    from run_apimart_minimax_h3 import ApimartError, write_json
-except ModuleNotFoundError:
-    from ..run_apimart_minimax_h3 import ApimartError, write_json
+from ..providers.apimart import ApimartError, write_json
 
-from .constants import H3_CANVAS_HEIGHT, H3_CANVAS_WIDTH, H3_FPS, H3_FRAME_COUNT
+from ..core.constants import H3_CANVAS_HEIGHT, H3_CANVAS_WIDTH, H3_FPS, H3_FRAME_COUNT
 
 @dataclass(frozen=True)
 class CanvasGeometry:
@@ -348,5 +345,3 @@ def select_keyframe(video: Path, output: Path, frame_index: int = 53) -> None:
     with Image.open(temporary) as image:
         image.convert("RGB").save(output, "PNG")
     temporary.unlink(missing_ok=True)
-
-

@@ -10,19 +10,12 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-try:
-    from run_apimart_minimax_h3 import ApimartError, write_json
-except ModuleNotFoundError:
-    from ..run_apimart_minimax_h3 import ApimartError, write_json
+from ..providers.apimart import ApimartError, write_json
+from ..core.repair_policy import RepairValidationError, validate_observation
 
-try:
-    from vetra_failure_repair import RepairValidationError, validate_observation
-except ModuleNotFoundError:
-    from ..vetra_failure_repair import RepairValidationError, validate_observation
-
-from .constants import H3_CLIENT, H3_FRAME_COUNT, H3_FPS, H3_CANVAS_WIDTH, H3_CANVAS_HEIGHT
-from .media import CanvasGeometry, has_audio, is_aligned_video, is_h3_input_video, is_h3_generated_video, materialize_stage_video, read_json, source_canvas_geometry, write_geometry_sidecar
-from .policy import normalized_prompt
+from ..core.constants import H3_CLIENT_MODULE, H3_FRAME_COUNT, H3_FPS, H3_CANVAS_WIDTH, H3_CANVAS_HEIGHT
+from ..media import CanvasGeometry, has_audio, is_aligned_video, is_h3_input_video, is_h3_generated_video, materialize_stage_video, read_json, source_canvas_geometry, write_geometry_sidecar
+from ..core.policy import normalized_prompt
 
 def reusable_h3_video_url(
     state_path: Path,
@@ -57,7 +50,7 @@ def invoke_h3_client(
     stage_dir: Path,
 ) -> None:
     command = [
-        sys.executable, str(H3_CLIENT), "--env-file", str(args.apimart_env),
+        sys.executable, "-m", H3_CLIENT_MODULE, "--env-file", str(args.apimart_env),
         "--request-timeout", str(args.request_timeout), "--poll-seconds", str(args.poll_seconds),
         "--total-timeout", str(args.total_timeout), "generate", "--prompt", h3_prompt,
         "--model", args.h3_model,

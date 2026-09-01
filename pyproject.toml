@@ -16,12 +16,13 @@ dev = ["pytest>=7"]
 apimart-h3-sequential = "apimart_h3_pipeline.runner:main"
 
 [tool.setuptools]
-package-dir = {"" = "scripts"}
-packages = ["apimart_h3_pipeline"]
-py-modules = ["run_apimart_minimax_h3", "vetra_failure_repair"]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.package-data]
-apimart_h3_pipeline = ["prompts/*.txt", "prompts/*.json"]
+apimart_h3_pipeline = ["resources/prompts/*.txt", "resources/prompts/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

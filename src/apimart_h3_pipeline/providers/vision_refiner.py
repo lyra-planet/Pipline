@@ -5,21 +5,14 @@ import json
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-try:
-    from run_apimart_minimax_h3 import ApimartError, write_json
-except ModuleNotFoundError:
-    from ..run_apimart_minimax_h3 import ApimartError, write_json
+from .apimart import ApimartError, write_json
+from ..core.repair_policy import RepairValidationError, validate_observation
 
-try:
-    from vetra_failure_repair import RepairValidationError, validate_observation
-except ModuleNotFoundError:
-    from ..vetra_failure_repair import RepairValidationError, validate_observation
-
-from .constants import OBSERVATION_FRAME_INDICES, PRIMARY_REFERENCE_FRAME_INDEX, QWEN_CONTEXT_FRAME_INDICES
-from .media import select_keyframe
-from .policy import normalized_prompt, parse_json_object, validate_h3_reference_tags
-from .prompt_catalog import PromptResourceError, render_prompt
-from .vision_client import DashScopeClient
+from ..core.constants import OBSERVATION_FRAME_INDICES, PRIMARY_REFERENCE_FRAME_INDEX, QWEN_CONTEXT_FRAME_INDICES
+from ..media import select_keyframe
+from ..core.policy import normalized_prompt, parse_json_object, validate_h3_reference_tags
+from ..resources.catalog import PromptResourceError, render_prompt
+from .dashscope_client import DashScopeClient
 
 class DashScopeVisionRefiner(DashScopeClient):
     """Constrained online Qwen-VL refiner for exactly one stage transition."""

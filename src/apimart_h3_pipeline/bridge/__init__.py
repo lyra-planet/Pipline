@@ -6,8 +6,8 @@ stable for launchers and tests.
 """
 from __future__ import annotations
 
-from . import bridge_execution as _execution
-from .bridge_helpers import (
+from . import execution as _execution
+from .helpers import (
     deterministic_repair_h3_prompt,
     load_task,
     prior_primary_reference,
@@ -18,7 +18,7 @@ from .bridge_helpers import (
     upload_bridge_image,
     upload_reference_image,
 )
-from .media import select_keyframe
+from ..media import select_keyframe
 
 
 def bridge_for_stage(*args, **kwargs):

@@ -5,27 +5,20 @@ import shutil
 from pathlib import Path
 from typing import Any, Mapping
 
-try:
-    from run_apimart_minimax_h3 import ApimartClient, ApimartError, write_json
-except ModuleNotFoundError:
-    from ..run_apimart_minimax_h3 import ApimartClient, ApimartError, write_json
+from ..providers.apimart import ApimartClient, ApimartError, write_json
+from ..core.repair_policy import RepairValidationError, apply_repair_clause, validate_repair_record
 
-try:
-    from vetra_failure_repair import RepairValidationError, apply_repair_clause, validate_repair_record
-except ModuleNotFoundError:
-    from ..vetra_failure_repair import RepairValidationError, apply_repair_clause, validate_repair_record
-
-from .constants import (
+from ..core.constants import (
     BRIDGE_KIND, DEFAULT_STATIC_REFERENCE_COUNT, GLOBAL_STYLE_REFERENCE_COUNT, PRIMARY_REFERENCE_FRAME_INDEX,
     QWEN_CONTEXT_FRAME_INDICES, TEMPORAL_END_FRAME_INDEX, TEMPORAL_MIDDLE_FRAME_INDEX, PROMPT_KEY,
 )
-from .image_editor import GrsaiImageEditor
-from .media import select_keyframe
-from .media import read_json
-from .policy import expected_reference_roles, normalized_prompt, reference_policy, reference_roles_match_policy, validate_h3_reference_tags
-from .vision import DashScopeVisionRefiner
+from ..providers.grsai import GrsaiImageEditor
+from ..media import select_keyframe
+from ..media import read_json
+from ..core.policy import expected_reference_roles, normalized_prompt, reference_policy, reference_roles_match_policy, validate_h3_reference_tags
+from ..providers.vision_refiner import DashScopeVisionRefiner
 
-from .bridge_helpers import (
+from .helpers import (
     deterministic_repair_h3_prompt,
     load_task,
     prior_primary_reference,

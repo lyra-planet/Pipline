@@ -13,13 +13,10 @@ from typing import Any, Mapping
 
 from PIL import Image
 
-try:
-    from run_apimart_minimax_h3 import ApimartError, read_env_file, write_json
-except ModuleNotFoundError:
-    from ..run_apimart_minimax_h3 import ApimartError, read_env_file, write_json
+from .apimart import ApimartError, read_env_file, write_json
 
-from .policy import no_proxy_opener
-from .media import read_json
+from ..core.policy import no_proxy_opener
+from ..media import read_json
 
 def find_url(value: Any) -> str | None:
     if isinstance(value, Mapping):

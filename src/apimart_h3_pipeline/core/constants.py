@@ -1,7 +1,10 @@
 """Stable protocol constants for the APIMart MiniMax-H3 runner."""
 from pathlib import Path
 
-SCRIPTS_DIR = Path(__file__).resolve().parent.parent
+# Kept as a compatibility constant for callers that inspect the old protocol.
+# Execution uses the importable module so installed wheels remain portable.
+SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
+H3_CLIENT_MODULE = "apimart_h3_pipeline.providers.apimart"
 H3_CLIENT = SCRIPTS_DIR / "run_apimart_minimax_h3.py"
 PROMPT_KEY = "audited_content_only_prompt"
 DASHSCOPE_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"

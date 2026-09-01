@@ -6,22 +6,24 @@ code, model weights, benchmark data, and historical run artifacts.
 
 ## What is included
 
-- `scripts/apimart_h3_pipeline/`: the implementation split by responsibility;
+- `src/apimart_h3_pipeline/`: the canonical implementation split by responsibility;
 - `scripts/run_apimart_minimax_h3_sequential.py`: backwards-compatible CLI;
 - `scripts/run_apimart_minimax_h3_sequential_screen.sh`: optional HTTP/tunnel
   supervisor with no machine-specific project paths;
 - `scripts/run_apimart_minimax_h3.py` and `scripts/vetra_failure_repair.py`:
-  provider client and closed-set failure-repair policy;
+  thin compatibility commands for the packaged provider client and repair policy;
 - `tests/`: media, bridge, retry, and modular-import regression tests;
 - `docs/`: the Chinese protocol and control-plane documentation.
 
-The implementation is intentionally provider-boundary aware.  Media
-normalization, reference policy, Qwen-VL observation, GRSAI image editing,
-bridge construction, artifact archival, and stage orchestration are separate
-modules.  A failed stage output is archived and observed but can never become
-the input of its own retry.  Global style edits start with a frame-0 style
-master and use frame `0/53/106` only for a failed retry; the middle and end
-anchors receive the frame-0 master as their style reference.
+The implementation is intentionally provider-boundary aware.  The source
+package uses two levels of responsibility: `core/`, `providers/`, `bridge/`,
+`execution/`, `media/`, and `resources/`.  Media normalization, reference
+policy, Qwen-VL observation, GRSAI image editing, bridge construction, artifact
+archival, and stage orchestration are separate modules.  A failed stage output
+is archived and observed but can never become the input of its own retry.
+Global style edits start with a frame-0 style master and use frame `0/53/106`
+only for a failed retry; the middle and end anchors receive the frame-0 master
+as their style reference.
 
 ## Install
 

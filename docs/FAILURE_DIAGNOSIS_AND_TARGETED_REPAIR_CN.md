@@ -101,7 +101,7 @@ MiniMax-H3 输出
 | 图片桥 | `bridge_for_stage()`，约 1425 行 | `bridge.json`、图片 URL、reference roles | 应用 `reference_policy` |
 | 三锚点规划 | `three_anchor_reference_plan()` | `middle/end_image_edit_prompt`、`style_reference_frame_index` | 本地确定性元数据；首帧是共享 style master，repair 只在 `style_inconsistency` 等类型触发 |
 | stage 状态机 | `main()`，约 1928 行 | `attempts`、`post_edit_observation` | 诊断、修复、传播闸门 |
-| 在线 H3 请求 | `run_apimart_minimax_h3.py` | request/poll/download state | 修复后按新 prompt 指纹提交新 task |
+| 在线 H3 请求 | `scripts/run_apimart_minimax_h3.py`（实现位于 `src/apimart_h3_pipeline/providers/apimart.py`） | request/poll/download state | 修复后按变化后的请求字段提交新 task |
 | 现有严格尝试模式 | `scripts/run_preplanned_h3_full_pipeline.py`，约 333-470 行 | attempt manifest、`semantic_failure` | 可借鉴停止传播和 stage attempt 结构 |
 
 ### 2.3 当前 observer 与诊断边界
@@ -139,7 +139,8 @@ MiniMax-H3 输出
 ### 3.1 组件边界
 
 执行层组件 `FailureDiagnosisAndRepair` 位于
-`scripts/vetra_failure_repair.py`，由目标 runner 直接导入。它不拥有 API 提交权限，也不读完整控制计划，职责包括：
+`src/apimart_h3_pipeline/core/repair_policy.py`，由目标 runner 直接导入；
+`scripts/vetra_failure_repair.py` 仅为兼容入口。它不拥有 API 提交权限，也不读完整控制计划，职责包括：
 
 1. 校验 observer diagnosis；
 2. 从有限枚举中选择 repair action；
@@ -426,7 +427,7 @@ Preservation evidence: <confirmed parent-stage summary only>
 - repair clause 不引入新的目标编辑；
 - video-only 阶段固定为 `Apply only this edit to <Video 1>: ...`，不附加图片标签；
 - 图片阶段继续由 `validate_h3_reference_tags()` 检查图片数量、source frame 和 anchor role；
-- 重试 prompt、repair action、输入父视频和参考图 URL 写入 bridge，成为 H3 请求恢复指纹的一部分。
+- 重试 prompt、repair action、输入父视频和参考图 URL 写入 bridge，作为 H3 请求恢复时的精确字段。
 
 ## 6. 状态、恢复和传播闸门
 
@@ -496,7 +497,7 @@ Preservation evidence: <confirmed parent-stage summary only>
 - H3 duration、resolution、aspect ratio、model；
 - APIMart/CTMOAI provider。
 
-只匹配 `output.mp4` 或只匹配“success=false”是不够的。修复 prompt 或参考图变化必须产生新的请求 fingerprint；CTMOAI 的稳定 `/sd-media/` URL 可以复用，临时 tunnel URL 仍要遵守现有风险控制。
+只匹配 `output.mp4` 或只匹配“success=false”是不够的。修复 prompt 或参考图变化时，保存的请求字段必须不同；CTMOAI 的稳定 `/sd-media/` URL 可以复用，临时 tunnel URL 仍要遵守现有风险控制。
 
 ### 6.3 当前严格的 stage 传播规则
 
@@ -618,7 +619,7 @@ observer_unavailable               -> observation_pending -> 不自动宣称成�
 - 启用 `strengthen_edit`、`strengthen_identity_preservation`、`strengthen_previous_stage_preservation`、`strengthen_motion`、`strengthen_composition`；
 - 默认保持原 reference policy；
 - 只允许一次重试；
-- 对每个 repair prompt 做 requirement guard 和请求指纹持久化。
+- 对每个 repair prompt 做 requirement guard，并持久化完整请求字段以支持恢复。
 
 ### Phase 3：选择性三锚点（已完成，保留固定基线）
 
@@ -632,7 +633,7 @@ observer_unavailable               -> observation_pending -> 不自动宣称成�
 - `observer_unavailable` 进入 `observation_pending`，由离线视频级复核决定；
 - 上层仍可选择回到最近的依赖祖先，但该回溯属于控制层显式决策，不能由 repair 组件偷偷改拓扑。
 
-本轮尚未完成的是线上付费端到端验证：需要使用真实 Task 139，在受控媒体服务和 provider 配额下确认请求指纹、断点恢复、上传 URL 和实际费用。
+本轮尚未完成的是线上付费端到端验证：需要使用真实 Task 139，在受控媒体服务和 provider 配额下确认请求字段恢复、上传 URL 和实际费用。
 
 ## 10. 风险和未决问题
 
@@ -641,7 +642,7 @@ observer_unavailable               -> observation_pending -> 不自动宣称成�
 3. **身份保持短语的边界**：identity preservation 是保持约束，不是新 requirement；但不能借此添加“增加第二个人”等原 prompt 没有的内容。
 4. **运动不可由静态帧确认**：`motion_weak` 需要视频级 temporal observer 或光流/轨迹证据。五帧静态 observer 只能判断“是否明显发生了构图差异”，不能证明真实 push-in 速度。
 5. **前序编辑保持率**：只把最近一条父 stage prompt 塞进 H3 可能仍然过长；应在 manifest 中保存短的 preservation summary，并单独评估历史编辑保持率。
-6. **API 成本和恢复**：每一个不同的 repaired prompt 都会改变 H3 request fingerprint。必须在 POST 前持久化 repair state，CTMOAI 优先使用稳定 media URL。
+6. **API 成本和恢复**：每一个不同的 repaired prompt 都会形成不同的已保存请求字段。必须在 POST 前持久化 repair state，CTMOAI 优先使用稳定 media URL。
 7. **当前三锚点输出的语义门**：实现已在第二次失败时停止传播并写入 `semantic_failure`；线上 provider 仍需确认不会产生旁路状态。
 8. **计划审计边界**：repair 组件不能回写 compiler 产物，也不能把 observer 结果当作新的 MSR requirement；需要在代码和 manifest 中明确只读边界。
 
@@ -662,7 +663,7 @@ observer_unavailable               -> observation_pending -> 不自动宣称成�
 
 ### 尚需验证或扩展
 
-- 使用真实 Task 139 做一次受控线上付费运行，验证 provider 请求指纹、断点恢复和费用；
+- 使用真实 Task 139 做一次受控线上付费运行，验证 provider 请求字段恢复和费用；
 - 补充视频级 motion/audio observer，并把它与静态五帧 gate 分开统计；
 - 编写固定三锚点与定向修复的配对实验脚本和汇总工具；
 - 在真实多 stage 任务上统计当前编辑成功率、历史编辑保持率、三锚点触发率、重试次数、成本及按 failure type 的成功率。

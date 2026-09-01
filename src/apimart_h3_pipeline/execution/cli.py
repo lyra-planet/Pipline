@@ -5,7 +5,7 @@ import argparse
 import os
 from pathlib import Path
 
-from .constants import (
+from ..core.constants import (
     DASHSCOPE_DEFAULT_BASE_URL,
     DASHSCOPE_DEFAULT_MODEL,
     DEFAULT_STATIC_REFERENCE_COUNT,
@@ -73,4 +73,3 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
-

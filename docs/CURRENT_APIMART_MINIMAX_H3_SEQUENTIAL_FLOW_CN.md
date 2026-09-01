@@ -35,7 +35,8 @@ Qwen 默认模型       qwen-vl-plus
 单任务总超时         900 秒
 ~~~
 
-核心常量见脚本第 47 行附近，CLI 定义见脚本第 1798 行附近。
+核心常量见 `src/apimart_h3_pipeline/core/constants.py`，CLI 定义见
+`src/apimart_h3_pipeline/execution/cli.py`；`scripts/` 下的文件只是兼容入口。
 
 ## 3. 总体数据流
 
@@ -119,7 +120,8 @@ offset_y = (768 - content_height) // 2
 
 随后执行 Lanczos 等比例缩放、黑边补齐到 1344x768、按完整源时长均匀重采样到 107 帧、必要时复制末帧、设为 24fps，并编码为 H.264/yuv420p/CRF18。初始视频使用静音 stereo AAC 48kHz 音轨，原视频音频不会保留。
 
-实现函数是 materialize_initial_video()，位于脚本第 254 行附近。
+实现函数 `materialize_initial_video()` 位于
+`src/apimart_h3_pipeline/media/video.py`。
 
 ## 6. 每个 stage 的 parent video
 
@@ -323,7 +325,7 @@ python scripts/run_apimart_minimax_h3_sequential.py --compiled-jobs /path/to/com
 5. 全局风格首次使用一张 primary reference，失败后直接升级三锚点；普通编辑默认按 failure type 定向修复，只有 `style_inconsistency` 或显式基线才在失败后升级三锚点。
 6. 下一轮输入是上一轮归一化后的输出，不是永远重新使用源视频。
 7. 中间视频固定为 1344x768、107 帧、24fps，最终输出才移除 letterbox。
-8. Qwen、GRSAI 和 H3 的状态均持久化，并按请求指纹恢复。
+8. Qwen、GRSAI 和 H3 的状态均持久化，并按已保存请求字段精确匹配恢复；项目不新增指纹或 ID。
 
 ## 16. 已接入的失败诊断与定向修复
 

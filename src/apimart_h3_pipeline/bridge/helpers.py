@@ -13,18 +13,11 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-try:
-    from run_apimart_minimax_h3 import ApimartClient, ApimartError
-except ModuleNotFoundError:
-    from ..run_apimart_minimax_h3 import ApimartClient, ApimartError
+from ..providers.apimart import ApimartClient, ApimartError
+from ..core.repair_policy import RepairValidationError, apply_repair_clause
 
-try:
-    from vetra_failure_repair import RepairValidationError, apply_repair_clause
-except ModuleNotFoundError:
-    from ..vetra_failure_repair import RepairValidationError, apply_repair_clause
-
-from .artifacts import attempt_number_from_path
-from .constants import (
+from ..execution.artifacts import attempt_number_from_path
+from ..core.constants import (
     BRIDGE_KIND,
     GLOBAL_STYLE_REFERENCE_COUNT,
     PRIMARY_REFERENCE_FRAME_INDEX,
@@ -32,9 +25,9 @@ from .constants import (
     TEMPORAL_END_FRAME_INDEX,
     TEMPORAL_MIDDLE_FRAME_INDEX,
 )
-from .media import read_json
-from .policy import expected_reference_roles, normalized_prompt, validate_h3_reference_tags
-from .prompt_catalog import PromptResourceError, render_prompt
+from ..media import read_json
+from ..core.policy import expected_reference_roles, normalized_prompt, validate_h3_reference_tags
+from ..resources.catalog import PromptResourceError, render_prompt
 
 
 def load_task(compiled_jobs: Path, task_id: str) -> dict[str, Any]:

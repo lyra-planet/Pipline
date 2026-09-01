@@ -21,19 +21,28 @@ def test_compatibility_entry_point_is_thin() -> None:
 def test_all_pipeline_boundaries_import_without_provider_calls() -> None:
     modules = (
         "apimart_h3_pipeline.constants",
+        "apimart_h3_pipeline.core.constants",
         "apimart_h3_pipeline.media",
+        "apimart_h3_pipeline.media.video",
         "apimart_h3_pipeline.policy",
+        "apimart_h3_pipeline.core.policy",
+        "apimart_h3_pipeline.core.repair_policy",
         "apimart_h3_pipeline.vision",
+        "apimart_h3_pipeline.providers.dashscope_client",
+        "apimart_h3_pipeline.providers.vision_refiner",
         "apimart_h3_pipeline.image_editor",
+        "apimart_h3_pipeline.providers.grsai",
         "apimart_h3_pipeline.bridge",
-        "apimart_h3_pipeline.bridge_helpers",
-        "apimart_h3_pipeline.bridge_execution",
+        "apimart_h3_pipeline.bridge.helpers",
+        "apimart_h3_pipeline.bridge.execution",
         "apimart_h3_pipeline.artifacts",
-        "apimart_h3_pipeline.cli",
+        "apimart_h3_pipeline.execution.cli",
+        "apimart_h3_pipeline.execution.artifacts",
         "apimart_h3_pipeline.prompt_catalog",
-        "apimart_h3_pipeline.vision_client",
-        "apimart_h3_pipeline.vision_refiner",
+        "apimart_h3_pipeline.resources.catalog",
+        "apimart_h3_pipeline.providers.apimart",
         "apimart_h3_pipeline.runner",
+        "apimart_h3_pipeline.execution.runner",
     )
     for name in modules:
         module = importlib.import_module(name)

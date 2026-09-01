@@ -5,25 +5,22 @@ This package is the implementation behind
 thin compatibility entry point; new integrations should import this package
 or use the `apimart-h3-sequential` console command.
 
+The source layout is deliberately shallow: `core/`, `providers/`, `bridge/`,
+`execution/`, `media/`, and `resources/` are the only responsibility
+subpackages.  This keeps ownership visible without turning every helper into
+another directory.
+
 ## Module boundaries
 
 | Module | Responsibility |
 | --- | --- |
-| `constants.py` | H3 media contract, frame roles, and schema identifiers |
-| `media.py` | `ffprobe`, letterbox/crop normalization, frame extraction, sidecars |
-| `policy.py` | static/video-only reference policy and prompt/tag validation |
-| `repair.py` | public boundary for the closed-set VETRA failure repair policy |
-| `vision.py` | Stable public API for Qwen-VL refinement and observation |
-| `vision_client.py` | DashScope transport, image encoding, and multimodal payloads |
-| `vision_refiner.py` | Reference planning, H3 prompt composition, and success-gate decisions |
-| `image_editor.py` | GRSAI asynchronous image-edit client |
-| `bridge.py` | Stable public bridge API retained for existing launchers |
-| `bridge_helpers.py` | task loading, uploads, reference plans, and deterministic prompt contracts |
-| `bridge_execution.py` | stage bridge coordinator and durable bridge artifact handling |
-| `prompt_catalog.py` | package-resource loading and template rendering |
-| `prompts/` | reviewable Qwen/H3/repair prompt templates and the repair clause table |
-| `artifacts.py` | request resume, attempt archival, and manifest records |
-| `runner.py` | stage lifecycle, immutable parent handling, retry routing, CLI |
+| `core/` | protocol constants, reference policy, and closed-set repair policy |
+| `providers/` | APIMart, DashScope, and GRSAI transport boundaries |
+| `bridge/` | reference planning, uploads, prompt contracts, and bridge execution |
+| `execution/` | CLI, stage lifecycle, immutable parent handling, and artifact records |
+| `media/` | `ffprobe`, letterbox/crop normalization, frame extraction, and sidecars |
+| `resources/` | package-resource prompt loading and reviewable prompt templates |
+| root compatibility modules | stable imports such as `apimart_h3_pipeline.vision` |
 
 The package deliberately keeps the control-plane boundary explicit.  A stage
 is executed against one immutable parent video.  A failed output is observed

@@ -11,23 +11,16 @@ import shutil
 from pathlib import Path
 from typing import Any, Mapping
 
-try:
-    from run_apimart_minimax_h3 import ApimartClient, ApimartError, resolve_credentials, write_json
-except ModuleNotFoundError:
-    from ..run_apimart_minimax_h3 import ApimartClient, ApimartError, resolve_credentials, write_json
-
-try:
-    from vetra_failure_repair import FailureDiagnosisAndRepair, RepairValidationError, STAGE_RETRY_LIMIT, fixed_three_anchor_repair, global_style_three_anchor_repair, stage_outcome, validate_repair_record
-except ModuleNotFoundError:
-    from ..vetra_failure_repair import FailureDiagnosisAndRepair, RepairValidationError, STAGE_RETRY_LIMIT, fixed_three_anchor_repair, global_style_three_anchor_repair, stage_outcome, validate_repair_record
+from ..providers.apimart import ApimartClient, ApimartError, resolve_credentials, write_json
+from ..core.repair_policy import FailureDiagnosisAndRepair, RepairValidationError, STAGE_RETRY_LIMIT, fixed_three_anchor_repair, global_style_three_anchor_repair, stage_outcome, validate_repair_record
 
 from .artifacts import archive_stage_attempt, attempt_number_from_path, confirmed_previous_requirements, invoke_h3_client, load_archived_attempts, load_current_observation, read_json, read_optional_json, replace_manifest_stage, reusable_h3_video_url, stage_failure_entry
-from .bridge import bridge_for_stage, deterministic_repair_h3_prompt, load_task, public_url, three_anchor_reference_plan
-from .constants import DEFAULT_STATIC_REFERENCE_COUNT, H3_CANVAS_HEIGHT, H3_CANVAS_WIDTH, PROMPT_KEY, QWEN_CONTEXT_FRAME_INDICES
-from .media import CanvasGeometry, geometry_sidecar, has_audio, is_aligned_video, is_h3_input_video, load_geometry_sidecar, materialize_final_video, materialize_initial_video, materialize_stage_video, source_canvas_geometry, write_geometry_sidecar
-from .policy import reference_policy
-from .vision import DashScopeVisionRefiner, observe_stage_output
-from .image_editor import GrsaiImageEditor
+from ..bridge import bridge_for_stage, deterministic_repair_h3_prompt, load_task, public_url, three_anchor_reference_plan
+from ..core.constants import DEFAULT_STATIC_REFERENCE_COUNT, H3_CANVAS_HEIGHT, H3_CANVAS_WIDTH, PROMPT_KEY, QWEN_CONTEXT_FRAME_INDICES
+from ..media import CanvasGeometry, geometry_sidecar, has_audio, is_aligned_video, is_h3_input_video, load_geometry_sidecar, materialize_final_video, materialize_initial_video, materialize_stage_video, source_canvas_geometry, write_geometry_sidecar
+from ..core.policy import reference_policy
+from ..providers.vision_refiner import DashScopeVisionRefiner, observe_stage_output
+from ..providers.grsai import GrsaiImageEditor
 
 from .cli import parse_args
 

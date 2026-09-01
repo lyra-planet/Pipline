@@ -10,43 +10,32 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
+
+SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src"
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
 
 from apimart_h3_pipeline import *  # noqa: F401,F403
-from apimart_h3_pipeline import artifacts as _artifacts
+from apimart_h3_pipeline.execution import artifacts as _artifacts
 from apimart_h3_pipeline import bridge as _bridge
-from apimart_h3_pipeline import image_editor as _image_editor
-from apimart_h3_pipeline import media as _media
-from apimart_h3_pipeline import policy as _policy
-from apimart_h3_pipeline import runner as _runner
-from apimart_h3_pipeline import vision as _vision
+from apimart_h3_pipeline.providers import grsai as _image_editor
+from apimart_h3_pipeline.media import video as _media
+from apimart_h3_pipeline.core import policy as _policy
+from apimart_h3_pipeline.execution import runner as _runner
+from apimart_h3_pipeline.providers import vision_refiner as _vision
 
-try:
-    from run_apimart_minimax_h3 import ApimartClient, ApimartError, resolve_credentials, write_json
-except ModuleNotFoundError:  # pragma: no cover - package import fallback
-    from ..run_apimart_minimax_h3 import ApimartClient, ApimartError, resolve_credentials, write_json
-
-try:
-    from vetra_failure_repair import (
-        FailureDiagnosisAndRepair,
-        RepairValidationError,
-        STAGE_RETRY_LIMIT,
-        fixed_three_anchor_repair,
-        global_style_three_anchor_repair,
-        stage_outcome,
-        validate_observation,
-        validate_repair_record,
-    )
-except ModuleNotFoundError:  # pragma: no cover - package import fallback
-    from ..vetra_failure_repair import (
-        FailureDiagnosisAndRepair,
-        RepairValidationError,
-        STAGE_RETRY_LIMIT,
-        fixed_three_anchor_repair,
-        global_style_three_anchor_repair,
-        stage_outcome,
-        validate_observation,
-        validate_repair_record,
-    )
+from apimart_h3_pipeline.providers.apimart import ApimartClient, ApimartError, resolve_credentials, write_json
+from apimart_h3_pipeline.core.repair_policy import (
+    FailureDiagnosisAndRepair,
+    RepairValidationError,
+    STAGE_RETRY_LIMIT,
+    fixed_three_anchor_repair,
+    global_style_three_anchor_repair,
+    stage_outcome,
+    validate_observation,
+    validate_repair_record,
+)
 
 
 def _sync_compatibility_patches() -> None:

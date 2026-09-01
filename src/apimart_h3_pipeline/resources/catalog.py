@@ -28,7 +28,7 @@ def _validate_name(name: str) -> str:
 
 def _resource(name: str):
     safe_name = _validate_name(name)
-    resource = resources.files("apimart_h3_pipeline").joinpath("prompts", safe_name)
+    resource = resources.files("apimart_h3_pipeline").joinpath("resources", "prompts", safe_name)
     if not resource.is_file():
         raise PromptResourceError(f"prompt resource does not exist: {safe_name}")
     return resource
