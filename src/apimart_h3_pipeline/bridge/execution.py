@@ -16,7 +16,6 @@ from ..providers.grsai import GRSAI_IMAGE_MODEL, GrsaiImageEditor, image_model_f
 from ..media import CanvasGeometry, read_json, select_keyframe
 from ..core.policy import expected_reference_roles, is_camera_motion_edit, is_dynamic_action_edit, normalized_prompt, reference_policy
 from ..resources.catalog import (
-    camera_motion_prompt,
     dynamic_action_prompt,
     image_edit_prompt,
 )
@@ -414,20 +413,20 @@ def bridge_for_stage(
             "usage": {},
         }
     elif is_camera_motion_edit(next_prompt):
-        # Physical camera edits are most reliable when MiniMax-H3 receives
-        # the user's atomic requirement verbatim.  Do not let either Qwen-VL
-        # reformulation or the generic camera contract dilute that request.
-        h3_prompt = f"{VIDEO_EDIT_PREFIX} {camera_motion_prompt(next_prompt)}"
-        final_refinement = {
-            "model": refiner.model,
-            "h3_prompt": h3_prompt,
-            "h3_prompt_source": "camera_requirement_with_preservation_contract",
-            "frame_observation": "camera requirement passed through with preservation contract",
-            "picture_count": len(reference_images),
-            "is_global_style": bool(policy.get("is_global_style")),
-            "repair_action": repair_context.get("repair_action") if repair_context else None,
-            "usage": {},
-        }
+        # Camera stages use the same official four-section Qwen prompt as all
+        # other stages. The observer, rather than a local image metric or a
+        # deterministic prompt shortcut, decides whether the physical camera
+        # movement is visible in the generated sequence.
+        final_refinement = refiner.compose_h3_prompt(
+            context_frames,
+            reference_images,
+            next_prompt,
+            bool(policy.get("is_global_style")),
+            reference_roles,
+            failure_observation,
+        )
+        final_refinement["h3_prompt_source"] = "qwen_vl_direct_camera"
+        h3_prompt = str(final_refinement["h3_prompt"])
     else:
         final_refinement = refiner.compose_h3_prompt(
             context_frames,
