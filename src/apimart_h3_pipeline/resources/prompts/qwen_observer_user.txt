@@ -1,4 +1,4 @@
 Atomic edit to inspect:
 ${raw_prompt}
 
-The attached images are five uniformly sampled frames from the generated output, in temporal order.
+The attached images are five uniformly sampled generated-output frames, in temporal order. When a second set is attached, the first five images are the matching source frames and the next five are the generated-output frames; compare each pair (source 0 with output 0, source 26 with output 26, and so on) before deciding success.

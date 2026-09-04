@@ -1,1 +1,1 @@
-Preserve the original scene and object motion while carrying out the requested camera movement.
+Preserve the original scene, subject identity, composition, and all other elements while carrying out the requested camera movement.

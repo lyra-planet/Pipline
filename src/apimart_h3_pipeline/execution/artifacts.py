@@ -159,6 +159,11 @@ def load_current_observation(stage_dir: Path, stage_label: str) -> dict[str, Any
     candidate = read_optional_json(stage_dir / "observation" / "observation.json")
     if candidate.get("stage") != stage_label:
         return None
+    # Output-only observations cannot validate preservation.  Re-observe old
+    # records on resume once paired source/output inspection is available.
+    source_frames = candidate.get("source_frames")
+    if not isinstance(source_frames, list) or not source_frames:
+        return None
     try:
         return validate_observation(candidate)
     except RepairValidationError:

@@ -133,7 +133,64 @@ def test_generate_materializes_files_and_resumes_saved_prompt(tmp_path: Path) ->
         stage_dir=tmp_path / "stage",
         stage_id="S1",
     )
-    assert [path for path, _ in resumed.calls] == ["/history/local-prompt"]
+    assert [path for path, _ in resumed.calls] == ["/history/local-prompt", "/history/local-prompt"]
+
+
+def test_generate_resubmits_when_saved_prompt_is_terminal_error(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    output = tmp_path / "stage" / "output.mp4"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    generated = output_dir / "stage_S1_00001.mp4"
+    generated.write_bytes(b"generated")
+
+    class FakeClient(LocalH3Client):
+        def __init__(self, config: LocalH3Config) -> None:
+            super().__init__(config)
+            self.calls: list[tuple[str, object]] = []
+
+        def _request_json(self, path: str, payload=None):  # type: ignore[no-untyped-def]
+            self.calls.append((path, payload))
+            if path == "/prompt":
+                return {"prompt_id": "replacement-prompt"}
+            if path == "/history/old-prompt":
+                return {"old-prompt": {"status": {"completed": False, "status_str": "error"}}}
+            return {
+                "replacement-prompt": {
+                    "status": {"completed": True, "status_str": "success"},
+                    "outputs": {"save": {"videos": [{"filename": generated.name, "subfolder": "", "type": "output"}]}},
+                }
+            }
+
+    stage_dir = tmp_path / "stage"
+    stage_dir.mkdir()
+    token = LocalH3Client._scoped_token(stage_dir, "S1")
+    (stage_dir / "local_task_state.json").write_text(json.dumps({
+        "request": {
+            "input_name": f"{token}_input.mp4",
+            "prompt": "Apply the edit.",
+            "reference_names": [],
+        },
+        "prompt_id": "old-prompt",
+        "workflow": str(stage_dir / "local_workflow.json"),
+    }), encoding="utf-8")
+
+    fake = FakeClient(client(tmp_path).config)
+    fake.generate(
+        source_video=source,
+        prompt="Apply the edit.",
+        reference_images=[],
+        destination=output,
+        stage_dir=stage_dir,
+        stage_id="S1",
+    )
+    assert [path for path, _ in fake.calls] == [
+        "/history/old-prompt", "/prompt", "/history/replacement-prompt"
+    ]
+    state = json.loads((stage_dir / "local_task_state.json").read_text(encoding="utf-8"))
+    assert state["prompt_id"] == "replacement-prompt"
+    assert state["previous_prompt_ids"] == ["old-prompt"]
 
 
 def test_scoped_materialization_keeps_queued_task_inputs_distinct(tmp_path: Path) -> None:

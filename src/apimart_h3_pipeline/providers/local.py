@@ -123,8 +123,8 @@ class LocalH3Client:
         )
         load_video_id, load_video_node = self._find_node(
             graph,
-            lambda class_type: class_type == "LoadVideo",
-            "LoadVideo",
+            lambda class_type: class_type in {"LoadVideo", "VHS_LoadVideo"},
+            "LoadVideo/VHS_LoadVideo",
         )
         save_video_id, save_video_node = self._find_node(
             graph,
@@ -132,7 +132,14 @@ class LocalH3Client:
             "SaveVideo",
         )
         h3_inputs = h3_node.setdefault("inputs", {})
-        load_video_node.setdefault("inputs", {})["file"] = input_name
+        load_inputs = load_video_node.setdefault("inputs", {})
+        if self._node_class(load_video_node) == "VHS_LoadVideo":
+            load_inputs["video"] = input_name
+            load_inputs["frame_load_cap"] = H3_FRAME_COUNT
+            load_inputs["skip_first_frames"] = 0
+            load_inputs["select_every_nth"] = 1
+        else:
+            load_inputs["file"] = input_name
         h3_inputs.update({
             "prompt": prompt,
             "width": H3_CANVAS_WIDTH,
@@ -285,20 +292,57 @@ class LocalH3Client:
         state_path = stage_dir / "local_task_state.json"
         request = {"prompt": prompt, "input_name": input_name, "reference_names": reference_names}
         state: dict[str, Any] = {}
+        previous_prompt_ids: list[str] = []
         if state_path.is_file():
             try:
                 loaded = json.loads(state_path.read_text(encoding="utf-8"))
             except (OSError, UnicodeError, json.JSONDecodeError):
                 loaded = {}
+            if isinstance(loaded, dict) and isinstance(loaded.get("previous_prompt_ids"), list):
+                previous_prompt_ids = [
+                    str(item) for item in loaded["previous_prompt_ids"] if isinstance(item, str)
+                ]
             if isinstance(loaded, dict) and loaded.get("request") == request and isinstance(loaded.get("prompt_id"), str):
                 state = loaded
         prompt_id = state.get("prompt_id")
+        if isinstance(prompt_id, str):
+            # A prompt that was explicitly interrupted or failed cannot be
+            # resumed.  Reusing its ID only re-reads the same terminal history
+            # entry, making every retry fail without submitting new work.
+            try:
+                history = self._request_json(f"/history/{prompt_id}")
+            except LocalH3Error:
+                # Keep the state when ComfyUI is temporarily unreachable; the
+                # caller can retry the same still-unknown job safely.
+                pass
+            else:
+                entry = history.get(prompt_id)
+                status = entry.get("status") if isinstance(entry, Mapping) else None
+                status_str = status.get("status_str") if isinstance(status, Mapping) else None
+                completed = status.get("completed") if isinstance(status, Mapping) else False
+                terminal_failure = status_str in {"error", "failed"} or (
+                    bool(completed) and status_str != "success"
+                )
+                if terminal_failure:
+                    previous_prompt_ids.append(prompt_id)
+                    print(json.dumps({
+                        "event": "resubmit_terminal_prompt",
+                        "prompt_id": prompt_id,
+                        "status": status_str,
+                    }, ensure_ascii=False), flush=True)
+                    prompt_id = None
+                    state = {}
         if not isinstance(prompt_id, str):
             submitted = self._request_json("/prompt", {"prompt": graph})
             prompt_id = submitted.get("prompt_id")
             if not isinstance(prompt_id, str) or not prompt_id:
                 raise LocalH3Error(f"local ComfyUI rejected workflow: {submitted}")
-            state = {"request": request, "prompt_id": prompt_id, "workflow": str(workflow_path)}
+            state = {
+                "request": request,
+                "prompt_id": prompt_id,
+                "workflow": str(workflow_path),
+                "previous_prompt_ids": previous_prompt_ids[-20:],
+            }
             write_json(state_path, state)
         generated = self._wait_for_output(prompt_id)
         destination.parent.mkdir(parents=True, exist_ok=True)

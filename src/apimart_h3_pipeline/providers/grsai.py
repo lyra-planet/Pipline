@@ -33,6 +33,10 @@ SUPPORTED_ASPECT_RATIOS = (
     ("16:9", 16 / 9),
 )
 GRSAI_CAPACITY_RETRY_SECONDS = 60
+GRSAI_FAILED_RETRY_LIMIT = 10
+GRSAI_FAILED_RETRY_SECONDS = 60
+GRSAI_OTHER_RETRY_LIMIT = 10
+GRSAI_OTHER_RETRY_SECONDS = 10
 GRSAI_IMAGE_MODEL = "nano-banana-2"
 
 
@@ -99,6 +103,10 @@ def find_id(value: Any) -> str | None:
             if found:
                 return found
     return None
+
+
+class GrsaiImageTaskFailed(ApimartError):
+    """GRSAI accepted an edit but returned a terminal failed status."""
 
 
 class GrsaiImageEditor:
@@ -173,7 +181,72 @@ class GrsaiImageEditor:
         style_reference: Path | None = None,
         aspect_ratio: str | None = None,
     ) -> dict[str, Any]:
-        """Run an image edit, waiting through transient provider overloads."""
+        """Run an image edit with bounded recovery for every failure class.
+
+        A provider-level ``failed`` status is retried separately from transport
+        and local errors so the requested retry budget is visible in logs and
+        persisted state.  The initial attempt is not counted as a retry.
+        """
+
+        failed_retries = 0
+        other_retries = 0
+
+        def record_retry(error: Exception, *, category: str, retry: int, delay: int) -> None:
+            try:
+                waiting_state = read_json(state_path) if state_path.is_file() else {}
+            except (OSError, UnicodeError, json.JSONDecodeError, ApimartError):
+                waiting_state = {}
+            retry_aspect_ratio = aspect_ratio
+            if not retry_aspect_ratio:
+                try:
+                    retry_aspect_ratio = aspect_ratio_for_image(image)
+                except Exception:
+                    # Do not replace the provider error with a diagnostic-only
+                    # failure while recording retry state.
+                    retry_aspect_ratio = None
+            waiting_state.update({
+                "status": f"retrying_{category}",
+                "model": getattr(self, "model", GRSAI_IMAGE_MODEL),
+                "raw_prompt": raw_prompt,
+                "image_edit_prompt": image_edit_prompt,
+                "style_reference": str(style_reference) if style_reference else None,
+                "aspect_ratio": retry_aspect_ratio,
+                "last_error": str(error),
+                "retry": retry,
+                "retry_limit": (
+                    GRSAI_FAILED_RETRY_LIMIT if category == "failed" else GRSAI_OTHER_RETRY_LIMIT
+                ),
+                "retry_after_seconds": delay,
+            })
+            write_json(state_path, waiting_state)
+            print(json.dumps({
+                "event": "grsai_image_edit_retry",
+                "category": category,
+                "retry": retry,
+                "retry_limit": waiting_state["retry_limit"],
+                "retry_after_seconds": delay,
+                "error": str(error),
+            }, ensure_ascii=False), flush=True)
+
+        def record_exhausted(error: Exception, *, category: str, retries: int) -> None:
+            try:
+                exhausted_state = read_json(state_path) if state_path.is_file() else {}
+            except (OSError, UnicodeError, json.JSONDecodeError, ApimartError):
+                exhausted_state = {}
+            exhausted_state.update({
+                "status": f"{category}_retry_exhausted",
+                "model": getattr(self, "model", GRSAI_IMAGE_MODEL),
+                "raw_prompt": raw_prompt,
+                "image_edit_prompt": image_edit_prompt,
+                "style_reference": str(style_reference) if style_reference else None,
+                "aspect_ratio": aspect_ratio,
+                "last_error": str(error),
+                "retry": retries,
+                "retry_limit": (
+                    GRSAI_FAILED_RETRY_LIMIT if category == "failed" else GRSAI_OTHER_RETRY_LIMIT
+                ),
+            })
+            write_json(state_path, exhausted_state)
 
         while True:
             try:
@@ -186,27 +259,34 @@ class GrsaiImageEditor:
                     style_reference=style_reference,
                     aspect_ratio=aspect_ratio,
                 )
-            except ApimartError as error:
-                if not is_capacity_overload_error(error):
+            except GrsaiImageTaskFailed as error:
+                if failed_retries >= GRSAI_FAILED_RETRY_LIMIT:
+                    record_exhausted(error, category="failed", retries=failed_retries)
                     raise
-                waiting_state = read_json(state_path) if state_path.is_file() else {}
-                waiting_state.update({
-                    "status": "waiting_for_capacity",
-                    "model": getattr(self, "model", GRSAI_IMAGE_MODEL),
-                    "raw_prompt": raw_prompt,
-                    "image_edit_prompt": image_edit_prompt,
-                    "style_reference": str(style_reference) if style_reference else None,
-                    "aspect_ratio": aspect_ratio or aspect_ratio_for_image(image),
-                    "last_error": str(error),
-                    "retry_after_seconds": GRSAI_CAPACITY_RETRY_SECONDS,
-                })
-                write_json(state_path, waiting_state)
-                print(json.dumps({
-                    "event": "grsai_capacity_wait",
-                    "retry_after_seconds": GRSAI_CAPACITY_RETRY_SECONDS,
-                    "error": str(error),
-                }, ensure_ascii=False), flush=True)
-                time.sleep(GRSAI_CAPACITY_RETRY_SECONDS)
+                failed_retries += 1
+                record_retry(
+                    error,
+                    category="failed",
+                    retry=failed_retries,
+                    delay=GRSAI_FAILED_RETRY_SECONDS,
+                )
+                time.sleep(GRSAI_FAILED_RETRY_SECONDS)
+            except Exception as error:
+                # Provider, network, media-download, and response parsing
+                # errors are all recoverable up to the bounded retry budget.
+                if other_retries >= GRSAI_OTHER_RETRY_LIMIT:
+                    record_exhausted(error, category="other", retries=other_retries)
+                    if isinstance(error, ApimartError):
+                        raise
+                    raise ApimartError(f"GRSAI image edit failed: {error}") from error
+                other_retries += 1
+                delay = (
+                    GRSAI_CAPACITY_RETRY_SECONDS
+                    if isinstance(error, ApimartError) and is_capacity_overload_error(error)
+                    else GRSAI_OTHER_RETRY_SECONDS
+                )
+                record_retry(error, category="other", retry=other_retries, delay=delay)
+                time.sleep(delay)
 
     def _edit_once(
         self,
@@ -273,7 +353,8 @@ class GrsaiImageEditor:
                     "error": detail or initial_status,
                 }
                 write_json(state_path, failed_state)
-                raise ApimartError(
+                failure_error = GrsaiImageTaskFailed if initial_status == "failed" else ApimartError
+                raise failure_error(
                     f"GRSAI image task failed immediately: status={initial_status}"
                     + (f" detail={detail[:300]}" if detail else "")
                 )
@@ -310,7 +391,8 @@ class GrsaiImageEditor:
                     "aspect_ratio": aspect_ratio,
                     "error": detail or status,
                 })
-                raise ApimartError(
+                failure_error = GrsaiImageTaskFailed if status == "failed" else ApimartError
+                raise failure_error(
                     f"GRSAI image task failed: task_id={task_id} status={status}"
                     + (f" detail={detail[:300]}" if detail else "")
                 )

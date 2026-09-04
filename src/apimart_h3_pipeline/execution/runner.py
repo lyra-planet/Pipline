@@ -370,6 +370,7 @@ def main() -> int:
                     task["task_id"],
                     stage_label,
                     raw_prompt,
+                    source_video=stage_parent_video,
                 )
             attempt_record: dict[str, Any] = {
                 "attempt": retry_index + 1,

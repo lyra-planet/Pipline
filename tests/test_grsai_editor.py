@@ -44,10 +44,10 @@ class GrsaiCapacityRetryTests(unittest.TestCase):
             self.assertEqual(edit_once.call_count, 2)
             sleep.assert_called_once_with(grsai.GRSAI_CAPACITY_RETRY_SECONDS)
             waiting_state = json.loads(state_path.read_text(encoding="utf-8"))
-            self.assertEqual(waiting_state["status"], "waiting_for_capacity")
+            self.assertEqual(waiting_state["status"], "retrying_other")
             self.assertEqual(waiting_state["retry_after_seconds"], 60)
 
-    def test_non_capacity_failure_is_raised_without_waiting(self) -> None:
+    def test_non_capacity_failure_retries_ten_times_then_raises(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             image = root / "input.png"
@@ -66,7 +66,30 @@ class GrsaiCapacityRetryTests(unittest.TestCase):
                     root / "output.png",
                     root / "state.json",
                 )
-            sleep.assert_not_called()
+            self.assertEqual(sleep.call_count, grsai.GRSAI_OTHER_RETRY_LIMIT)
+
+    def test_failed_status_retries_ten_times_at_one_minute(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            image = root / "input.png"
+            image.write_bytes(b"input")
+            editor = grsai.GrsaiImageEditor.__new__(grsai.GrsaiImageEditor)
+            error = grsai.GrsaiImageTaskFailed("GRSAI image task failed: status=failed")
+            with (
+                patch.object(editor, "_edit_once", side_effect=error) as edit_once,
+                patch.object(grsai.time, "sleep") as sleep,
+                self.assertRaisesRegex(grsai.GrsaiImageTaskFailed, "status=failed"),
+            ):
+                editor.edit(
+                    image,
+                    "raw prompt",
+                    "image edit prompt",
+                    root / "output.png",
+                    root / "state.json",
+                )
+            self.assertEqual(edit_once.call_count, grsai.GRSAI_FAILED_RETRY_LIMIT + 1)
+            self.assertEqual(sleep.call_count, grsai.GRSAI_FAILED_RETRY_LIMIT)
+            sleep.assert_called_with(grsai.GRSAI_FAILED_RETRY_SECONDS)
 
 
 class GrsaiModelPayloadTests(unittest.TestCase):

@@ -34,6 +34,8 @@ from .helpers import (
     upload_reference_image,
 )
 
+VIDEO_EDIT_PREFIX = "The target video is an edited version of <Video 1>."
+
 
 def _edit_reference_image(
     editor: GrsaiImageEditor,
@@ -126,6 +128,10 @@ def bridge_for_stage(
             and bridge.get("previous_video") == str(previous_video)
             and bridge.get("policy") == policy
             and isinstance(h3_prompt, str)
+            and (
+                not is_camera_motion_edit(next_prompt)
+                or h3_prompt.startswith(VIDEO_EDIT_PREFIX)
+            )
             and isinstance(refiner_metadata, Mapping)
             and refiner_metadata.get("model") == refiner.model
             and isinstance(final_refiner_metadata, Mapping)
@@ -385,28 +391,18 @@ def bridge_for_stage(
         else:
             raise ApimartError(f"unsupported reference image count: {reference_count}")
 
-    if is_camera_motion_edit(next_prompt):
-        # Physical camera edits are most reliable when MiniMax-H3 receives
-        # the user's atomic requirement verbatim.  Do not let either Qwen-VL
-        # reformulation or the generic camera contract dilute that request.
-        h3_prompt = normalized_prompt(next_prompt)
-        final_refinement = {
-            "model": refiner.model,
-            "h3_prompt": h3_prompt,
-            "h3_prompt_source": "raw_camera_requirement",
-            "frame_observation": "camera requirement passed through verbatim",
-            "picture_count": len(reference_images),
-            "is_global_style": bool(policy.get("is_global_style")),
-            "repair_action": repair_context.get("repair_action") if repair_context else None,
-            "usage": {},
-        }
-    elif repair_context is not None and repair_context.get("mode") != "fixed_three_anchor":
+    if repair_context is not None and repair_context.get("mode") != "fixed_three_anchor":
+        # A camera stage that failed the motion gate must use the targeted
+        # repair prompt.  Keep this branch before the normal camera path so a
+        # retry cannot silently fall back to the unchanged first-attempt text.
         h3_prompt = deterministic_repair_h3_prompt(
             next_prompt,
             len(reference_images),
             reference_roles,
             repair_context,
         )
+        if is_camera_motion_edit(next_prompt) and not h3_prompt.startswith(VIDEO_EDIT_PREFIX):
+            h3_prompt = f"{VIDEO_EDIT_PREFIX} {h3_prompt}"
         final_refinement = {
             "model": refiner.model,
             "h3_prompt": h3_prompt,
@@ -415,6 +411,21 @@ def bridge_for_stage(
             "picture_count": len(reference_images),
             "is_global_style": bool(policy.get("is_global_style")),
             "repair_action": repair_context["repair_action"],
+            "usage": {},
+        }
+    elif is_camera_motion_edit(next_prompt):
+        # Physical camera edits are most reliable when MiniMax-H3 receives
+        # the user's atomic requirement verbatim.  Do not let either Qwen-VL
+        # reformulation or the generic camera contract dilute that request.
+        h3_prompt = f"{VIDEO_EDIT_PREFIX} {camera_motion_prompt(next_prompt)}"
+        final_refinement = {
+            "model": refiner.model,
+            "h3_prompt": h3_prompt,
+            "h3_prompt_source": "camera_requirement_with_preservation_contract",
+            "frame_observation": "camera requirement passed through with preservation contract",
+            "picture_count": len(reference_images),
+            "is_global_style": bool(policy.get("is_global_style")),
+            "repair_action": repair_context.get("repair_action") if repair_context else None,
             "usage": {},
         }
     else:
