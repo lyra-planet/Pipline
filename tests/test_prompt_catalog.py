@@ -81,7 +81,7 @@ def test_qwen_h3_prompt_contract_puts_operation_before_references() -> None:
         role_contract="<Picture 1> = edited primary anchor, source frame 0",
     )
     assert "Return only the prompt text, with no JSON wrapper" in system
-    assert "exactly four sections" in system
+    assert "Use exactly these four headings in order" in system
     assert user.index("subject_definitions") < user.index("summary") < user.index("retention_analysis") < user.index("detailed_description")
     assert "source frame" in user and "frame anchor" in contract
 
