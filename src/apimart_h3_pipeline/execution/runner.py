@@ -71,6 +71,12 @@ def main() -> int:
     if not 4 <= args.duration <= 15:
         raise ApimartError("duration must be from 4 to 15")
     task = load_task(args.compiled_jobs.resolve(), args.task_id)
+    if args.last_stage:
+        stage_index = next((index for index, stage in enumerate(task["stages"]) if stage["stage_id"] == args.last_stage), None)
+        if stage_index is None:
+            valid = ", ".join(stage["stage_id"] for stage in task["stages"])
+            raise ApimartError(f"--last-stage must be one of: {valid}")
+        task["stages"] = task["stages"][:stage_index + 1]
     start_stage = getattr(args, "start_stage", None)
     start_index = 0
     if start_stage:
@@ -78,12 +84,6 @@ def main() -> int:
         if start_index is None:
             valid = ", ".join(stage["stage_id"] for stage in task["stages"])
             raise ApimartError(f"--start-stage must be one of: {valid}")
-    if args.last_stage:
-        stage_index = next((index for index, stage in enumerate(task["stages"]) if stage["stage_id"] == args.last_stage), None)
-        if stage_index is None:
-            valid = ", ".join(stage["stage_id"] for stage in task["stages"])
-            raise ApimartError(f"--last-stage must be one of: {valid}")
-        task["stages"] = task["stages"][:stage_index + 1]
     if start_index >= len(task["stages"]):
         raise ApimartError("--start-stage must not be after --last-stage")
     args.out_dir.mkdir(parents=True, exist_ok=True)
