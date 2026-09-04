@@ -80,11 +80,10 @@ def test_qwen_h3_prompt_contract_puts_operation_before_references() -> None:
         picture_tags="<Picture 1>",
         role_contract="<Picture 1> = edited primary anchor, source frame 0",
     )
-    assert "Begin h3_prompt with the exact raw atomic requirement text verbatim" in system
-    assert "picture-to-frame mapping supplied below is mandatory" in system
-    assert user.index("Start h3_prompt with the raw atomic edit requirement") < user.index("Only after")
-    assert "source frame" in user and "locked" in user
-    assert contract.index("first sentence must state the raw operation") < contract.index("assign appearance")
+    assert "Return only the prompt text, with no JSON wrapper" in system
+    assert "exactly four sections" in system
+    assert user.index("subject_definitions") < user.index("summary") < user.index("retention_analysis") < user.index("detailed_description")
+    assert "source frame" in user and "frame anchor" in contract
 
 
 def test_three_anchor_resource_contains_the_frame_lock_contract() -> None:
@@ -101,8 +100,7 @@ def test_three_anchor_resource_contains_the_frame_lock_contract() -> None:
     assert "source frame 0" in rendered
     assert "source frame 53" in rendered
     assert "source frame 106" in rendered
-    assert "frame-lock" in rendered
-    assert "first sentence must state the raw operation" in rendered
+    assert "frame-anchor" in rendered or "frame anchor" in rendered
 
 
 def test_repair_clause_actions_are_a_closed_nonempty_mapping() -> None:

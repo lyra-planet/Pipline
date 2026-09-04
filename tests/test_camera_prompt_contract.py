@@ -24,10 +24,7 @@ def context_frames(root: Path) -> list[Path]:
 def refiner_with_response(response_prompt: str) -> DashScopeVisionRefiner:
     refiner = object.__new__(DashScopeVisionRefiner)
     refiner.model = "qwen-vl-plus-test"
-    refiner.complete = lambda _payload: (
-        json.dumps({"h3_prompt": response_prompt, "frame_observation": "observed"}),
-        {"usage": {}},
-    )
+    refiner.complete = lambda _payload: (response_prompt, {"usage": {}})
     return refiner
 
 
@@ -193,7 +190,7 @@ def test_qwen_prompt_is_used_without_reference_contract_validation(tmp_path: Pat
     def complete(_payload):
         nonlocal calls
         calls += 1
-        return json.dumps({"h3_prompt": response_prompt, "frame_observation": "observed"}), {"usage": {}}
+        return response_prompt, {"usage": {}}
 
     refiner.complete = complete
     result = refiner.compose_h3_prompt(

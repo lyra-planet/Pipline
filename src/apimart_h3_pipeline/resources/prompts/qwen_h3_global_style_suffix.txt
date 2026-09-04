@@ -1,1 +1,1 @@
-For a global style edit, describe only visible style properties supported by the generated pictures and require the appearance consistently throughout the video.
+For a global visual-style edit, describe only visible style properties supported by the attached frames/references and require that appearance consistently throughout <Video 1>. Keep the four required sections and use a standalone picture only for a concrete frame anchor; otherwise define an appearance Subject. Do not add audio or unrelated edits.

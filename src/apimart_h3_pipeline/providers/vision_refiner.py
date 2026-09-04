@@ -145,25 +145,20 @@ class DashScopeVisionRefiner(DashScopeClient):
                 },
             ],
             "temperature": 0,
-            "max_tokens": 520,
+            "max_tokens": 900,
         }
         response_text, response = self.complete(payload)
-        try:
-            result = parse_json_object(response_text, "Qwen-VL final H3 prompt")
-        except ApimartError:
-            # Use a non-JSON Qwen response verbatim instead of rejecting it.
-            result = {"h3_prompt": response_text, "frame_observation": ""}
-        # Qwen-VL owns the final wording.  Do not reject or rewrite it based
-        # on reference tags, source-frame declarations, length limits, or
-        # other prompt contracts.  The only required boundary is parsing the
-        # provider's JSON response so the H3 prompt can be retrieved.
-        h3_prompt = str(result.get("h3_prompt", ""))
+        # The final editor prompt is intentionally plain text.  JSON is used
+        # only by the separate reference-planner and observer control calls.
+        h3_prompt = response_text.strip()
+        if not h3_prompt:
+            raise ApimartError("Qwen-VL returned an empty final H3 prompt")
         usage = response.get("usage")
         return {
             "model": self.model,
             "h3_prompt": h3_prompt,
             "h3_prompt_source": "qwen_vl_direct",
-            "frame_observation": normalized_prompt(str(result.get("frame_observation", ""))),
+            "frame_observation": "",
             "picture_count": picture_count,
             "is_global_style": is_global_style,
             "repair_attempts": [],
