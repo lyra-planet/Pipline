@@ -1,4 +1,4 @@
 Atomic edit to inspect:
 ${raw_prompt}
 
-The attached images are five uniformly sampled generated-output frames, in temporal order. When a second set is attached, the first five images are the matching source frames and the next five are the generated-output frames; compare each pair (source 0 with output 0, source 26 with output 26, and so on) before deciding success.
+The attached images are five uniformly sampled checkpoints in playback order. When two sets are attached, the first set is the source video and the second set is the generated output; compare the matching pairs at frames 0, 26, 53, 80, and 106. First establish what remains constant from source to output. Then decide whether the requested edit is visible throughout the sequence. For a camera request, describe the visible change in framing across time and distinguish camera motion from subject motion, zoom, crop, cut, or scene replacement. Do not infer success from the prompt alone. Put concise visual evidence in observation and observer_evidence, but return only the four required JSON keys.
