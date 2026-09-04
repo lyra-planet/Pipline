@@ -3,6 +3,8 @@ ${raw_prompt}
 
 Read the five source-video frames in time order and any attached pictures. Return only these four sections, with no text before or after them.
 
+Follow the output contract literally. Start summary with [video editing] The target video is an edited version of <Video 1>. Include every concrete picture anchor listed in the reference contract using its exact <Picture N> label and role; do not omit or rename it. Use fully_preserved, partially_preserved, or weak_reference in retention_analysis and give one concise visible reason for each important reference or subject. Mention only details visible in the supplied images.
+
 subject_definitions:
 Define <Video 1> as the source video. Define each important visible subject separately, for example the person as <Subject 1> and the visible environment as <Subject 2>. Mention only details that are clearly visible. Do not invent a picture when none is attached.
 
@@ -13,4 +15,4 @@ retention_analysis:
 For <Video 1>, use partially_preserved when the requested operation changes any part of the video, and explain which part changes. For an unchanged person, object, or environment, use fully_preserved and describe preserved appearance or content, never an environment's action. Use weak_reference only for a general visual reference. Give one short reason for each entry.
 
 detailed_description:
-Describe the source shot and the requested operation in playback order. Name the actual camera or visual operation from the raw requirement and describe how it affects only the requested target. For a camera operation, state that frame 0 is exactly unchanged and that the camera change begins immediately after frame 0; preserve the subject's identity, action, focus, scale, and framing as closely as possible without forcing a centered position. For a non-camera operation, preserve camera motion and all unrelated visual content unless the raw requirement changes them. Do not add unrequested people, objects, actions, lighting, scene changes, effects, camera operations, cuts, or audio.
+Describe the source shot and the requested operation in playback order. Name the actual visual operation from the raw requirement and describe how it affects only the requested target. Only when the raw requirement is a camera operation, state that frame 0 is exactly unchanged and that the camera change begins immediately after frame 0. For every other operation, do not add camera-change or frame-0-lock language; preserve the source camera behavior and all unrelated visual content unless the raw requirement changes them. Do not add unrequested people, objects, actions, lighting, scene changes, effects, camera operations, cuts, or audio.

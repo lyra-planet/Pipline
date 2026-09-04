@@ -24,7 +24,7 @@ H3 画布             1344 x 768
 H3 中间视频帧数     107
 H3 中间视频帧率     24 fps
 Qwen 上下文帧       0, 26, 53, 80, 106
-Qwen 默认模型       qwen-vl-plus
+Qwen 默认模型       qwen-vl-max
 普通静态编辑默认参考图数量  1
 全局风格首次执行参考图数量  1
 全局风格失败重试参考图数量  3
@@ -322,7 +322,7 @@ GRSAI_API_KEY：nano-banana-2
 ~/.dashscope.env（也可通过 `DASHSCOPE_ENV_FILE` 指定）
 ~~~
 
-Qwen-VL 和 GRSAI 使用 direct opener；APIMart H3 客户端继承进程中的 HTTP/HTTPS 代理。当前 refiner 拒绝 qwen-max 和 qwen3-max，默认使用 qwen-vl-plus。
+ Qwen-VL 和 GRSAI 使用 direct opener；APIMart H3 客户端继承进程中的 HTTP/HTTPS 代理。当前 refiner 默认使用 qwen-vl-max，Qwen-VL Max 可通过 `--dashscope-model` 显式指定。
 
 ~~~bash
 python scripts/run_apimart_minimax_h3_sequential.py --compiled-jobs /path/to/compiled_jobs.json --task-id 139 --out-dir /path/to/run/task_139 --media-dir /path/to/media/task_139 --media-public-base-url http://<public-media-host>:<port> --apimart-env /secure/apimart.env --grsai-env /secure/grsai.env --dashscope-env /secure/dashscope.env --duration 4 --resolution 768P --aspect-ratio 16:9

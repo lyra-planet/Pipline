@@ -30,8 +30,8 @@ class DashScopeClient:
             raise ApimartError(f"DASHSCOPE_API_KEY is absent from {env_file}")
         self.url = base_url.rstrip("/") + "/chat/completions"
         self.model = model.strip()
-        if not self.model or self.model.lower() in {"qwen-max", "qwen3-max"}:
-            raise ApimartError("Qwen Max-tier models are not allowed for transition refinement")
+        if not self.model:
+            raise ApimartError("a Qwen-VL model is required for transition refinement")
         self.timeout_seconds = timeout_seconds
         self.opener = no_proxy_opener()
 
