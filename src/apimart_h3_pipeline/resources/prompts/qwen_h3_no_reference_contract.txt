@@ -1,1 +1,1 @@
-No picture is attached for this stage. Use only <Video 1> in subject_definitions and do not create any <Picture N> or <Subject N> reference entry. The four required sections still apply. The summary must start with [video editing] and then "The target video is an edited version of <Video 1>." Do not add audio, soundscape, or music sections.
+No picture is attached. Do not create any <Picture N> entry. Define visible subjects as <Subject N> entries. Use the four required sections and keep the summary prefix [video editing].
