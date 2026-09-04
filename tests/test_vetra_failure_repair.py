@@ -182,14 +182,14 @@ class VetraRepairPolicyTests(unittest.TestCase):
                 original_policy=policy(),
             )
 
-    def test_low_confidence_failure_is_not_repairable(self) -> None:
+    def test_low_confidence_failure_remains_repairable(self) -> None:
         diagnosed = self.policy.diagnose(
             diagnosis("edit_missing", confidence=0.2),
             stage_id="S2",
             current_requirement=self.current,
             failed_prompt=self.failed,
         )
-        self.assertFalse(diagnosed["repairable"])
+        self.assertTrue(diagnosed["repairable"])
 
     def test_retry_budget_is_hard_capped(self) -> None:
         self.assertEqual(STAGE_RETRY_LIMIT, 1)

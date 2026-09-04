@@ -269,10 +269,13 @@ class FailureDiagnosisAndRepair:
         normalized = validate_observation(observation)
         confidence = float(normalized["confidence"])
         failure_type = str(normalized["failure_type"])
+        # A low-confidence semantic failure is still actionable: the output
+        # did not pass the observer gate, so let the bounded stage retry try a
+        # targeted repair. Confidence remains persisted for audit and routing
+        # diagnostics, but never suppresses an otherwise valid repair action.
         repairable = (
             normalized["success"] is False
             and failure_type in REPAIRABLE_FAILURE_TYPES
-            and confidence >= self.confidence_threshold
         )
         if failure_type == "previous_stage_lost" and not confirmed_stage_ids(previous_requirements):
             repairable = False
