@@ -23,12 +23,13 @@ class DashScopeVisionRefiner(DashScopeClient):
         next_raw_prompt: str,
         is_global_style: bool,
     ) -> dict[str, Any]:
-        """Inspect the parent frames while fixing the reference to frame zero."""
+        """Inspect all parent frames and choose the clearest editable anchor."""
 
         try:
             system = render_prompt(
                 "qwen_reference_system.txt",
                 primary_frame_index=PRIMARY_REFERENCE_FRAME_INDEX,
+                candidate_frame_indices=", ".join(map(str, QWEN_CONTEXT_FRAME_INDICES)),
             )
             user = render_prompt(
                 "qwen_reference_user.txt",
@@ -57,9 +58,10 @@ class DashScopeVisionRefiner(DashScopeClient):
             selected_frame_index = int(result.get("selected_frame_index"))
         except (TypeError, ValueError) as error:
             raise ApimartError("Qwen-VL returned an invalid selected_frame_index") from error
-        if selected_frame_index != PRIMARY_REFERENCE_FRAME_INDEX:
+        if selected_frame_index not in QWEN_CONTEXT_FRAME_INDICES:
             raise ApimartError(
-                f"Qwen-VL selected_frame_index must be {PRIMARY_REFERENCE_FRAME_INDEX}: "
+                "Qwen-VL selected_frame_index must be one of "
+                f"{QWEN_CONTEXT_FRAME_INDICES}: "
                 f"{selected_frame_index}"
             )
         usage = response.get("usage")

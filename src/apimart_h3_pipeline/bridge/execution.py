@@ -10,11 +10,11 @@ from ..core.repair_policy import RepairValidationError, apply_repair_clause, val
 
 from ..core.constants import (
     BRIDGE_KIND, DEFAULT_STATIC_REFERENCE_COUNT, GLOBAL_STYLE_REFERENCE_COUNT, PRIMARY_REFERENCE_FRAME_INDEX,
-    QWEN_CONTEXT_FRAME_INDICES, TEMPORAL_END_FRAME_INDEX, TEMPORAL_MIDDLE_FRAME_INDEX, PROMPT_KEY,
+    QWEN_CONTEXT_FRAME_INDICES, PROMPT_KEY,
 )
 from ..providers.grsai import GRSAI_IMAGE_MODEL, GrsaiImageEditor, image_model_for_stage
 from ..media import CanvasGeometry, read_json, select_keyframe
-from ..core.policy import expected_reference_roles, is_camera_motion_edit, is_dynamic_action_edit, normalized_prompt, reference_policy
+from ..core.policy import expected_reference_roles, is_camera_motion_edit, is_dynamic_action_edit, normalized_prompt, reference_policy, temporal_reference_indices
 from ..resources.catalog import (
     dynamic_action_prompt,
     image_edit_prompt,
@@ -116,10 +116,7 @@ def bridge_for_stage(
         final_refiner_metadata = bridge.get("final_refiner")
         expected_count = int(policy["reference_image_count"])
         saved_selected_frame = bridge.get("selected_frame_index")
-        first_frame_reference = (
-            expected_count == 0
-            or saved_selected_frame == PRIMARY_REFERENCE_FRAME_INDEX
-        )
+        first_frame_reference = expected_count == 0 or saved_selected_frame in QWEN_CONTEXT_FRAME_INDICES
         if (
             bridge.get("kind") == BRIDGE_KIND
             and bridge.get("stage_id", stage_label) == stage_label
@@ -264,7 +261,7 @@ def bridge_for_stage(
                 and reference_plan_state.get("model") == refiner.model
                 and reference_plan_state.get("is_global_style") == bool(policy.get("is_global_style"))
                 and isinstance(reference_plan_state.get("result"), Mapping)
-                and reference_plan_state["result"].get("selected_frame_index") == PRIMARY_REFERENCE_FRAME_INDEX
+                and reference_plan_state["result"].get("selected_frame_index") in QWEN_CONTEXT_FRAME_INDICES
             ):
                 reference_plan = dict(reference_plan_state["result"])
             else:
@@ -288,10 +285,10 @@ def bridge_for_stage(
             reference_plan["image_edit_prompt"] = image_edit_prompt(next_prompt)
             reference_plan["image_edit_prompt_source"] = "raw_atomic_prompt_with_preservation_constraint"
             selected_frame_index = int(reference_plan["selected_frame_index"])
-            if selected_frame_index != PRIMARY_REFERENCE_FRAME_INDEX:
+            if selected_frame_index not in QWEN_CONTEXT_FRAME_INDICES:
                 raise ApimartError(
-                    "reference plan must use the first parent frame as the primary style master: "
-                    f"{selected_frame_index} != {PRIMARY_REFERENCE_FRAME_INDEX}"
+                    "reference plan selected an unavailable parent frame: "
+                    f"{selected_frame_index} not in {QWEN_CONTEXT_FRAME_INDICES}"
                 )
             primary_reference = bridge_dir / f"{file_prefix}_reference_frame_{selected_frame_index:03d}.png"
             primary_edit_input = context_by_index[selected_frame_index]
@@ -309,7 +306,7 @@ def bridge_for_stage(
         if reference_count == 1:
             reference_images = [primary_reference]
             image_edits = [primary_edit_state]
-            reference_roles = expected_reference_roles(reference_count)
+            reference_roles = expected_reference_roles(reference_count, selected_frame_index)
         elif reference_count == GLOBAL_STYLE_REFERENCE_COUNT:
             three_anchor_plan_path = bridge_dir / f"{file_prefix}_three_anchor_plan.json"
             three_anchor_plan_state = read_json(three_anchor_plan_path) if three_anchor_plan_path.is_file() else {}
@@ -321,12 +318,11 @@ def bridge_for_stage(
                 and three_anchor_plan_state.get("selected_frame_index") == selected_frame_index
                 and three_anchor_plan_state.get("primary_reference") == str(primary_reference)
                 and isinstance(three_anchor_plan_state.get("result"), Mapping)
-                and three_anchor_plan_state["result"].get("style_reference_frame_index")
-                == PRIMARY_REFERENCE_FRAME_INDEX
-                and three_anchor_plan_state["result"].get("middle_frame_index")
-                == TEMPORAL_MIDDLE_FRAME_INDEX
-                and three_anchor_plan_state["result"].get("end_frame_index")
-                == TEMPORAL_END_FRAME_INDEX
+                and (
+                    three_anchor_plan_state["result"].get("style_reference_frame_index"),
+                    three_anchor_plan_state["result"].get("middle_frame_index"),
+                    three_anchor_plan_state["result"].get("end_frame_index"),
+                ) == temporal_reference_indices(selected_frame_index)
                 and isinstance(three_anchor_plan_state["result"].get("middle_image_edit_prompt"), str)
                 and isinstance(three_anchor_plan_state["result"].get("end_image_edit_prompt"), str)
             ):
@@ -353,8 +349,8 @@ def bridge_for_stage(
             # The first-frame primary is the shared style master. The middle
             # and end anchors are edited from their own parent frames while
             # receiving that first-frame image as an explicit style reference.
-            middle_frame_index = TEMPORAL_MIDDLE_FRAME_INDEX
-            end_frame_index = TEMPORAL_END_FRAME_INDEX
+            middle_frame_index = int(three_anchor_plan["middle_frame_index"])
+            end_frame_index = int(three_anchor_plan["end_frame_index"])
             middle_reference = bridge_dir / f"{file_prefix}_reference_frame_{middle_frame_index:03d}.png"
             end_reference = bridge_dir / f"{file_prefix}_reference_frame_{end_frame_index:03d}.png"
             middle_edit_input = context_by_index[middle_frame_index]
@@ -386,7 +382,7 @@ def bridge_for_stage(
             # master, middle temporal anchor, then end temporal anchor.
             reference_images = [primary_reference, middle_reference, end_reference]
             image_edits = [primary_edit_state, middle_edit_state, end_edit_state]
-            reference_roles = expected_reference_roles(reference_count)
+            reference_roles = expected_reference_roles(reference_count, selected_frame_index)
         else:
             raise ApimartError(f"unsupported reference image count: {reference_count}")
 

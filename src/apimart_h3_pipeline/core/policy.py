@@ -10,7 +10,8 @@ from ..providers.apimart import ApimartError
 
 from .constants import (
     DEFAULT_STATIC_REFERENCE_COUNT, GLOBAL_STYLE_REFERENCE_COUNT, REFERENCE_IMAGE_COUNTS,
-    PRIMARY_REFERENCE_FRAME_INDEX, TEMPORAL_END_FRAME_INDEX, TEMPORAL_MIDDLE_FRAME_INDEX,
+    PRIMARY_REFERENCE_FRAME_INDEX, QWEN_CONTEXT_FRAME_INDICES,
+    TEMPORAL_END_FRAME_INDEX, TEMPORAL_MIDDLE_FRAME_INDEX,
 )
 
 def is_global_style_edit(prompt: str) -> bool:
@@ -205,31 +206,62 @@ def normalized_prompt(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
-def expected_reference_roles(reference_count: int) -> list[dict[str, Any]]:
+def expected_reference_roles(
+    reference_count: int,
+    primary_frame_index: int = PRIMARY_REFERENCE_FRAME_INDEX,
+) -> list[dict[str, Any]]:
     """Return the stable role contract for the attached reference images."""
+
+    if primary_frame_index not in QWEN_CONTEXT_FRAME_INDICES:
+        raise ApimartError(f"unsupported primary reference frame index: {primary_frame_index}")
 
     if reference_count == DEFAULT_STATIC_REFERENCE_COUNT:
         return [{
             "picture_index": 1,
             "role": "edited primary anchor",
-            "source_frame_index": PRIMARY_REFERENCE_FRAME_INDEX,
+            "source_frame_index": primary_frame_index,
         }]
     if reference_count == GLOBAL_STYLE_REFERENCE_COUNT:
+        anchor_indices = temporal_reference_indices(primary_frame_index)
+        role_names = (
+            ("edited start anchor", "edited primary anchor", "edited end anchor")
+            if primary_frame_index == PRIMARY_REFERENCE_FRAME_INDEX
+            else ("edited primary anchor", "edited middle anchor", "edited end anchor")
+        )
         return [
             {
                 "picture_index": 1,
-                "role": "edited start anchor",
-                "source_frame_index": PRIMARY_REFERENCE_FRAME_INDEX,
+                "role": role_names[0],
+                "source_frame_index": anchor_indices[0],
             },
             {
                 "picture_index": 2,
-                "role": "edited primary anchor",
-                "source_frame_index": TEMPORAL_MIDDLE_FRAME_INDEX,
+                "role": role_names[1],
+                "source_frame_index": anchor_indices[1],
             },
             {
                 "picture_index": 3,
-                "role": "edited end anchor",
-                "source_frame_index": TEMPORAL_END_FRAME_INDEX,
+                "role": role_names[2],
+                "source_frame_index": anchor_indices[2],
             },
         ]
     raise ApimartError(f"unsupported reference image count: {reference_count}")
+
+
+def temporal_reference_indices(primary_frame_index: int) -> tuple[int, int, int]:
+    """Choose three distinct anchors with the selected frame first."""
+
+    if primary_frame_index not in QWEN_CONTEXT_FRAME_INDICES:
+        raise ApimartError(f"unsupported primary reference frame index: {primary_frame_index}")
+    selected: list[int] = []
+    for frame_index in (
+        primary_frame_index,
+        TEMPORAL_MIDDLE_FRAME_INDEX,
+        TEMPORAL_END_FRAME_INDEX,
+        *QWEN_CONTEXT_FRAME_INDICES,
+    ):
+        if frame_index not in selected:
+            selected.append(frame_index)
+        if len(selected) == GLOBAL_STYLE_REFERENCE_COUNT:
+            break
+    return selected[0], selected[1], selected[2]

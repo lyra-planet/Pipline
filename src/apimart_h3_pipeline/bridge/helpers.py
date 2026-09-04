@@ -21,12 +21,11 @@ from ..core.constants import (
     BRIDGE_KIND,
     GLOBAL_STYLE_REFERENCE_COUNT,
     PRIMARY_REFERENCE_FRAME_INDEX,
+    QWEN_CONTEXT_FRAME_INDICES,
     PROMPT_KEY,
-    TEMPORAL_END_FRAME_INDEX,
-    TEMPORAL_MIDDLE_FRAME_INDEX,
 )
 from ..media import read_json
-from ..core.policy import expected_reference_roles, is_camera_motion_edit, is_dynamic_action_edit, normalized_prompt
+from ..core.policy import expected_reference_roles, is_camera_motion_edit, is_dynamic_action_edit, normalized_prompt, temporal_reference_indices
 from ..resources.catalog import PromptResourceError, camera_motion_prompt, dynamic_action_prompt, image_edit_prompt, render_prompt
 
 
@@ -139,7 +138,7 @@ def prior_primary_reference(
             )
         except (TypeError, ValueError) as error:
             raise ApimartError(f"{attempt_dir.name} bridge lacks Qwen's selected frame index") from error
-        if selected_frame_index != PRIMARY_REFERENCE_FRAME_INDEX:
+        if selected_frame_index not in QWEN_CONTEXT_FRAME_INDICES:
             continue
         reference_images = bridge.get("reference_images")
         if not isinstance(reference_images, list) or not reference_images:
@@ -150,7 +149,7 @@ def prior_primary_reference(
             for index, role in enumerate(roles):
                 if (
                     isinstance(role, Mapping)
-                    and role.get("source_frame_index") == PRIMARY_REFERENCE_FRAME_INDEX
+                    and role.get("source_frame_index") == selected_frame_index
                     and role.get("role") in {"edited start anchor", "edited primary anchor"}
                 ):
                     primary_index = index
@@ -233,17 +232,13 @@ def three_anchor_reference_plan(
     requirement = normalized_prompt(raw_prompt)
     if not requirement:
         raise ApimartError("three-anchor reference plan requires a non-empty atomic requirement")
-    if selected_frame_index != PRIMARY_REFERENCE_FRAME_INDEX:
-        raise ApimartError(
-            "three-anchor reference plan requires the first parent frame as its style master: "
-            f"{selected_frame_index} != {PRIMARY_REFERENCE_FRAME_INDEX}"
-        )
+    anchor_indices = temporal_reference_indices(selected_frame_index)
     return {
         "model": model,
         "selected_frame_index": selected_frame_index,
-        "style_reference_frame_index": PRIMARY_REFERENCE_FRAME_INDEX,
-        "middle_frame_index": TEMPORAL_MIDDLE_FRAME_INDEX,
-        "end_frame_index": TEMPORAL_END_FRAME_INDEX,
+        "style_reference_frame_index": anchor_indices[0],
+        "middle_frame_index": anchor_indices[1],
+        "end_frame_index": anchor_indices[2],
         "middle_image_edit_prompt": image_edit_prompt(requirement),
         "end_image_edit_prompt": image_edit_prompt(requirement),
         "image_edit_prompt_source": "raw_atomic_prompt_with_preservation_constraint",

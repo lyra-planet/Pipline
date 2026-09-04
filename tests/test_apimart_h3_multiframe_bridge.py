@@ -165,7 +165,7 @@ class H3MultiframeBridgeTests(unittest.TestCase):
             self.assertEqual(edit_state["content_output"], edit_state["output"])
             self.assertIsNone(editor.calls[0]["style_reference"])
 
-    def test_qwen_reference_planner_requires_first_parent_frame(self) -> None:
+    def test_qwen_reference_planner_prefers_first_parent_but_accepts_clear_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             context_frames = []
@@ -197,7 +197,11 @@ class H3MultiframeBridgeTests(unittest.TestCase):
             )
             self.assertEqual(result["selected_frame_index"], pipeline.PRIMARY_REFERENCE_FRAME_INDEX)
             self.assertIn(
-                f"must be the integer {pipeline.PRIMARY_REFERENCE_FRAME_INDEX}",
+                f"index {pipeline.PRIMARY_REFERENCE_FRAME_INDEX}",
+                captured_payloads[0]["messages"][0]["content"],
+            )
+            self.assertIn(
+                ", ".join(map(str, pipeline.QWEN_CONTEXT_FRAME_INDICES)),
                 captured_payloads[0]["messages"][0]["content"],
             )
 
@@ -212,12 +216,12 @@ class H3MultiframeBridgeTests(unittest.TestCase):
                 )
 
             refiner.complete = complete_middle
-            with self.assertRaises(pipeline.ApimartError):
-                refiner.plan_reference(
-                    context_frames,
-                    "Recolor the background blue.",
-                    True,
-                )
+            result = refiner.plan_reference(
+                context_frames,
+                "Recolor the background blue.",
+                False,
+            )
+            self.assertEqual(result["selected_frame_index"], pipeline.TEMPORAL_MIDDLE_FRAME_INDEX)
 
     def test_failed_single_reference_reuses_qwen_frame_as_three_anchor_master(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
