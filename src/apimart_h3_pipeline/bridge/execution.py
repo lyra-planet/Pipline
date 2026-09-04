@@ -390,7 +390,6 @@ def bridge_for_stage(
         else:
             raise ApimartError(f"unsupported reference image count: {reference_count}")
 
-    qwen_authored_prompt = False
     if repair_context is not None and repair_context.get("mode") != "fixed_three_anchor":
         # A camera stage that failed the motion gate must use the targeted
         # repair prompt.  Keep this branch before the normal camera path so a
@@ -428,7 +427,6 @@ def bridge_for_stage(
         )
         final_refinement["h3_prompt_source"] = "qwen_vl_direct_camera"
         h3_prompt = str(final_refinement["h3_prompt"])
-        qwen_authored_prompt = True
     else:
         final_refinement = refiner.compose_h3_prompt(
             context_frames,
@@ -439,14 +437,6 @@ def bridge_for_stage(
             failure_observation,
         )
         h3_prompt = str(final_refinement["h3_prompt"])
-        qwen_authored_prompt = True
-    if qwen_authored_prompt:
-        # Keep the atomic requirement prominent for H3 while retaining the
-        # complete Qwen-authored structured prompt after it.
-        raw_prefix = next_prompt.strip()
-        h3_prompt = f"{raw_prefix}, {raw_prefix}, {h3_prompt.strip()}"
-        final_refinement["h3_prompt"] = h3_prompt
-        final_refinement["raw_prompt_prefix_repetitions"] = 2
     bridge: dict[str, Any] = {
         "kind": BRIDGE_KIND,
         "stage_id": stage_label,
