@@ -34,13 +34,18 @@ SUPPORTED_ASPECT_RATIOS = (
 )
 GRSAI_CAPACITY_RETRY_SECONDS = 60
 GRSAI_IMAGE_MODEL = "nano-banana-2"
-GPT_IMAGE_MODEL = "gpt-image-2"
 
 
 def image_model_for_stage(stage_id: str) -> str:
-    """Return the static-reference model assigned to a sequential stage."""
+    """Return the static-reference model assigned to a sequential stage.
 
-    return GRSAI_IMAGE_MODEL if stage_id.strip().upper() == "S1" else GPT_IMAGE_MODEL
+    The stage argument is retained as part of the provider boundary so callers
+    can select a model without changing their execution flow.  All image-edit
+    stages intentionally use the same GRSAI model.
+    """
+
+    del stage_id
+    return GRSAI_IMAGE_MODEL
 
 
 def is_capacity_overload_error(error: BaseException) -> bool:

@@ -73,8 +73,8 @@ class GrsaiModelPayloadTests(unittest.TestCase):
     def test_stage_model_routing(self) -> None:
         self.assertEqual(grsai.image_model_for_stage("S1"), "nano-banana-2")
         self.assertEqual(grsai.image_model_for_stage("s1"), "nano-banana-2")
-        self.assertEqual(grsai.image_model_for_stage("S2"), "gpt-image-2")
-        self.assertEqual(grsai.image_model_for_stage("S12"), "gpt-image-2")
+        self.assertEqual(grsai.image_model_for_stage("S2"), "nano-banana-2")
+        self.assertEqual(grsai.image_model_for_stage("S12"), "nano-banana-2")
 
     def test_edit_submits_nano_banana_two_and_downloads_result(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -113,7 +113,7 @@ class GrsaiModelPayloadTests(unittest.TestCase):
             with Image.open(output) as opened:
                 self.assertEqual(opened.size, (16, 9))
 
-    def test_edit_submits_selected_stage_model(self) -> None:
+    def test_edit_submits_nano_banana_two_for_every_stage(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             image = root / "input.png"
@@ -139,9 +139,9 @@ class GrsaiModelPayloadTests(unittest.TestCase):
                     aspect_ratio="16:9",
                 )
 
-            self.assertEqual(request.call_args.args[2]["model"], "gpt-image-2")
-            self.assertEqual(result["model"], "gpt-image-2")
-            self.assertEqual(json.loads(state.read_text(encoding="utf-8"))["model"], "gpt-image-2")
+            self.assertEqual(request.call_args.args[2]["model"], "nano-banana-2")
+            self.assertEqual(result["model"], "nano-banana-2")
+            self.assertEqual(json.loads(state.read_text(encoding="utf-8"))["model"], "nano-banana-2")
 
 
 if __name__ == "__main__":

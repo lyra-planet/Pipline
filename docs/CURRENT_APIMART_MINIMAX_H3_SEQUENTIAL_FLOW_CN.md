@@ -160,14 +160,13 @@ reference_policy() 是本地正则启发式，不是 Qwen 分类器。它会先�
 
 需要参考图时，Qwen 仍接收原始 atomic prompt 和 parent video 的五帧，用于内容观察和审计；参考帧不再由 Qwen 自由选择，普通路径固定使用上下文首帧 `frame 0` 作为 primary style master。只有进入三锚点 retry/显式三图实验时，才额外编辑中间帧 `frame 53` 和末帧 `frame 106`；这两次图片编辑都把首帧生成的 primary style master 作为 `style_reference`。Qwen 返回观察和固定帧契约的元数据。
 
-S1 只要需要图片编辑，使用一张已经按 H3 画布处理的带黑边参考帧，调用 GRSAI `nano-banana-2` 做一次 atomic image edit；不在图片编辑阶段裁剪、回填或再次扩展画布。三锚点 S1 的首帧、中间帧和末帧分别使用各自的带黑边 H3 参考帧编辑，中间帧和末帧额外接收首帧作为风格参考。S1 之外的 stage 使用 `gpt-image-2`，仍保持每个普通 stage 一轮图片编辑。
+只要 stage 需要图片编辑，使用一张已经按 H3 画布处理的带黑边参考帧，调用 GRSAI `nano-banana-2` 做一次 atomic image edit；不在图片编辑阶段裁剪、回填或再次扩展画布。三锚点的首帧、中间帧和末帧分别使用各自的带黑边 H3 参考帧编辑，中间帧和末帧额外接收首帧作为风格参考。所有 stage 统一使用 `nano-banana-2`，仍保持每个普通 stage 一轮图片编辑。
 
 图片编辑服务是 GRSAI；模型按 stage 选择：
 
 ~~~text
 POST <GRSAI_BASE_URL>/v1/api/generate
-model       = nano-banana-2  # S1
-model       = gpt-image-2    # S1 之外的 stage
+model       = nano-banana-2  # 所有需要图片编辑的 stage
 replyType   = async
 aspectRatio = closest supported ratio of the actual edit input
 ~~~

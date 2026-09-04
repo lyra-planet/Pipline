@@ -51,7 +51,7 @@ flowchart TD
     KF --> QWEN
     QWEN --> HP[简洁 H3 prompt]
     QWEN --> IP[可选 image_edit_prompt]
-    IP --> IMG[图像编辑 API / S1: nano-banana-2; 其他 stage: gpt-image-2<br/>只修改静态目标]
+    IP --> IMG[图像编辑 API / 所有 stage: nano-banana-2<br/>只修改静态目标]
     IMG --> PIC[内容对齐参考图<br/><Picture 1> 或三张 anchor]
 
     PREV --> H3[MiniMax-H3 Ref2VA<br/>视频负责运动和时序]
@@ -462,7 +462,7 @@ task_139_S1_keyframe_000.png（正常路径；首帧 style master，文件名必
         ↓ 全局风格失败或 style_inconsistency retry 时
 task_139_S1_keyframe_000.png + task_139_S1_keyframe_053.png + task_139_S1_keyframe_106.png（升级路径）
         ↓ Qwen-VL image_edit_prompt
-图像模型（S1 使用 nano-banana-2；S1 之外的 stage 使用 gpt-image-2）
+图像模型（所有需要图片编辑的 stage 统一使用 nano-banana-2）
         ↓
 task_139_S1_reference_image_1.png（内容与关键帧对齐）
         ↓ 上传到 H3 API / 放入 ComfyUI LoadImage
