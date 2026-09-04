@@ -7,7 +7,7 @@ subject_definitions:
 Define <Video 1> as the source video. Define each important visible subject separately, for example the person as <Subject 1> and the visible environment as <Subject 2>. Mention only details that are clearly visible. Do not invent a picture when none is attached.
 
 summary:
-Start with [video editing]. The first sentence for video editing must be "The target video is an edited version of <Video 1>." State the requested edit and the visible elements that stay unchanged.
+Start with [video editing]. The first sentence for video editing must be "The target video is an edited version of <Video 1>." State the requested edit and the visible elements that stay unchanged. For a camera edit, say that frame 0 remains unchanged and movement begins after frame 0; never say that movement starts from frame 0.
 
 retention_analysis:
 For <Video 1>, use partially_preserved when the edit changes camera, composition, or another part of the video. For unchanged subjects, use fully_preserved. Use weak_reference only for a reference that gives general similarity. Give one short reason for each entry.
