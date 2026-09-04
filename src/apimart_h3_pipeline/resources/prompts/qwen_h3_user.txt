@@ -7,10 +7,10 @@ subject_definitions:
 Define <Video 1> as the source video. Define each important visible subject separately, for example the person as <Subject 1> and the visible environment as <Subject 2>. Mention only details that are clearly visible. Do not invent a picture when none is attached.
 
 summary:
-Start with [video editing]. The first sentence for video editing must be "The target video is an edited version of <Video 1>." State the requested edit and the visible elements that stay unchanged. For a camera edit, say that frame 0 remains unchanged and movement begins after frame 0; never say that movement starts from frame 0.
+Start with [video editing]. The first sentence for video editing must be "The target video is an edited version of <Video 1>." For a camera edit, say "Frame 0 remains exactly unchanged." Then state the requested movement and the visible elements that stay unchanged. Never say that movement starts from frame 0. Do not describe an environment as having an identity or action.
 
 retention_analysis:
-For <Video 1>, use partially_preserved when the edit changes camera, composition, or another part of the video. For unchanged subjects, use fully_preserved. Use weak_reference only for a reference that gives general similarity. Give one short reason for each entry.
+For <Video 1>, use partially_preserved when the edit changes camera composition. For an unchanged person or object, use fully_preserved. Describe an unchanged environment as preserved visual content, not as an actor with an action. Use weak_reference only for a reference that gives general similarity. Give one short reason for each entry.
 
 detailed_description:
-Describe the source shot and the requested edit in playback order. For a camera edit, include this exact sentence: "Frame 0 remains unchanged; the smooth horizontal pan begins after frame 0." Name the requested direction, keep the subject in focus with scale and composition as stable as possible, and do not force the subject to remain centered. Do not add or remove visible elements, change lighting, zoom, tilt, rotate, cut, or change the lens.
+Describe the source shot and the requested edit in playback order. For a camera edit, write: "The first frame, frame 0, must remain exactly unchanged. Beginning immediately after frame 0, move the camera smoothly using a continuous horizontal pan in the requested direction at a steady speed." Keep the subject continuously in focus and preserve identity, appearance, walking action, scale, and framing as closely as possible; do not force the subject to remain centered. Do not zoom, dolly, tilt, rotate, change the lens, introduce cuts, alter lighting, add or remove objects, modify the background, or create new motion.
