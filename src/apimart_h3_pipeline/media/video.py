@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -246,67 +247,53 @@ def materialize_stage_video(
     target: Path,
     geometry: CanvasGeometry | None = None,
 ) -> Path:
-    """Crop generated padding and restore the H3 canvas for the next stage."""
+    """Publish a stage result without changing its pixels.
+
+    Stage outputs are the immutable inputs to the next H3 request. Cropping,
+    padding, or scaling here changes the visual state between edits, so all
+    geometry restoration is deferred to :func:`materialize_final_video`.
+    The provider must already have returned the native H3 canvas; incompatible
+    output is rejected instead of being silently transformed.
+    """
 
     geometry = geometry or source_canvas_geometry(source)
     if (
-        is_aligned_video(target)
-        and has_audio(target)
+        target.is_file()
+        and is_aligned_video(target)
         and is_h3_input_video(target)
         and geometry_matches(target, geometry, "stage_input")
     ):
         return target
     if not is_aligned_video(source) or not is_h3_generated_video(source):
         raise ApimartError(f"stage output is not a supported 768P raster with 107 frames at 24 fps: {source}")
+    if not is_h3_input_video(source):
+        raise ApimartError(
+            f"stage output must already be 1344x768; refusing intermediate crop/scale: {source}"
+        )
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.stem}.partial.mp4")
-    source_video = stream_of(ffprobe(source), "video")
-    source_width = int(source_video["width"]) if source_video else H3_CANVAS_WIDTH
-    normalize = f"crop={H3_CANVAS_WIDTH}:{H3_CANVAS_HEIGHT}:{(source_width - H3_CANVAS_WIDTH) // 2}:0" if source_width != H3_CANVAS_WIDTH else ""
-    filter_graph = ",".join(part for part in (
-        normalize,
-        f"crop={geometry.content_width}:{geometry.content_height}:{geometry.offset_x}:{geometry.offset_y}",
-        f"pad={H3_CANVAS_WIDTH}:{H3_CANVAS_HEIGHT}:{geometry.offset_x}:{geometry.offset_y}:color=black",
-    ) if part)
-    if has_audio(source):
-        run_ffmpeg(
-            [
-                "ffmpeg", "-nostdin", "-y", "-v", "error", "-i", str(source),
-                "-map", "0:v:0", "-map", "0:a:0", "-vf", filter_graph,
-                "-frames:v", str(H3_FRAME_COUNT), "-r", str(H3_FPS),
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(temporary),
-            ],
-            f"failed to reset letterbox around {source}",
-        )
-    else:
-        run_ffmpeg(
-            [
-                "ffmpeg", "-nostdin", "-y", "-v", "error", "-i", str(source),
-                "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-                "-map", "0:v:0", "-map", "1:a:0", "-vf", filter_graph,
-                "-frames:v", str(H3_FRAME_COUNT), "-r", str(H3_FPS),
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", str(temporary),
-            ],
-            f"failed to reset letterbox and add a silent track to {source}",
-        )
-    if not is_aligned_video(temporary) or not has_audio(temporary) or not is_h3_input_video(temporary):
+    shutil.copy2(source, temporary)
+    if not is_aligned_video(temporary) or not is_h3_input_video(temporary):
         temporary.unlink(missing_ok=True)
-        raise ApimartError(f"prepared stage media is not 1344x768/107-frame/24fps: {source}")
+        raise ApimartError(f"published stage media is not 1344x768/107-frame/24fps: {source}")
     temporary.replace(target)
     write_geometry_sidecar(target, geometry, "stage_input")
     return target
 
 
 def materialize_final_video(source: Path, target: Path, geometry: CanvasGeometry) -> Path:
-    """Crop the H3 canvas back to the source aspect-ratio content rectangle."""
+    """Crop the H3 canvas and restore the source video's exact dimensions."""
 
     if not is_aligned_video(source) or not is_h3_input_video(source):
         raise ApimartError(f"final H3 media is not exactly 1344x768, 107 frames at 24 fps: {source}")
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.stem}.partial.mp4")
-    filter_graph = f"crop={geometry.content_width}:{geometry.content_height}:{geometry.offset_x}:{geometry.offset_y}"
+    filter_graph = ",".join(
+        (
+            f"crop={geometry.content_width}:{geometry.content_height}:{geometry.offset_x}:{geometry.offset_y}",
+            f"scale={geometry.source_width}:{geometry.source_height}:flags=lanczos",
+        )
+    )
     if has_audio(source):
         command = [
             "ffmpeg", "-nostdin", "-y", "-v", "error", "-i", str(source),

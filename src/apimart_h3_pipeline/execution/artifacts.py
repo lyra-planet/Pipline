@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -104,7 +105,17 @@ def invoke_h3_client(
         "h3_prompt": h3_prompt,
         "reference_image_count": len(image_urls),
     }, ensure_ascii=False), flush=True)
-    completed = subprocess.run(command, check=False)
+    # The compatibility entry point adds ``src`` only to its own interpreter.
+    # Pass that same source root to the H3 child process so direct source-tree
+    # execution remains portable without requiring a prior editable install.
+    source_root = str(Path(__file__).resolve().parents[2])
+    environment = os.environ.copy()
+    existing_pythonpath = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = (
+        source_root if not existing_pythonpath
+        else source_root + os.pathsep + existing_pythonpath
+    )
+    completed = subprocess.run(command, check=False, env=environment)
     if completed.returncode:
         raise ApimartError(f"APIMart H3 client failed for stage {stage['stage_id']} with exit code {completed.returncode}")
 

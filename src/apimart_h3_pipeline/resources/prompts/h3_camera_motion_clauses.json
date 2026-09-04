@@ -1,0 +1,11 @@
+{
+  "pan": "Use a smooth horizontal pan in the requested direction, keeping the same subject in focus.",
+  "push_in": "Use forward physical camera motion as requested; do not replace it with a lens zoom.",
+  "pull_out": "Use backward physical camera motion as requested; do not replace it with a lens zoom.",
+  "zoom": "Change the lens framing as requested; do not replace it with physical camera movement.",
+  "dolly": "Use the requested physical dolly movement; do not replace it with a lens zoom or subject motion.",
+  "tilt": "Use the requested vertical camera tilt; do not replace it with subject motion.",
+  "orbit": "Use the requested camera orbit around the subject; do not replace it with subject rotation.",
+  "tracking": "Use the requested camera tracking movement; do not replace it with subject motion.",
+  "generic": "Execute the named camera movement literally; do not replace it with a different camera movement or subject motion."
+}

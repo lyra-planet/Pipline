@@ -26,6 +26,36 @@ from ..providers.local import LocalH3MediaAdapter
 from .cli import parse_args
 
 
+def next_parent_video_url(
+    apimart: Any,
+    parent: Path,
+    saved_next_url: Any,
+    media_public_base_url: str | None,
+    backend: str,
+) -> str:
+    """Resolve the parent reference persisted after a completed stage.
+
+    Online APIMart stages consume a public media URL, while the local ComfyUI
+    backend consumes filesystem paths directly. Keeping this decision in one
+    helper prevents local runs from accidentally calling ``public_url`` with a
+    missing base URL or with a caller-supplied URL that local H3 cannot read.
+    """
+
+    if backend == "local":
+        return str(parent.resolve())
+    if (
+        apimart.is_ctmoai
+        and isinstance(saved_next_url, str)
+        and saved_next_url.startswith(apimart.base_url.rstrip("/") + "/sd-media/")
+    ):
+        return saved_next_url
+    if apimart.is_ctmoai:
+        return apimart.upload_media(parent, "videos")
+    if not media_public_base_url:
+        raise ApimartError("--media-public-base-url is required for online parent videos")
+    return public_url(media_public_base_url, parent.name)
+
+
 def main() -> int:
     args = parse_args()
     backend = getattr(args, "h3_backend", "online")
@@ -41,12 +71,21 @@ def main() -> int:
     if not 4 <= args.duration <= 15:
         raise ApimartError("duration must be from 4 to 15")
     task = load_task(args.compiled_jobs.resolve(), args.task_id)
+    start_stage = getattr(args, "start_stage", None)
+    start_index = 0
+    if start_stage:
+        start_index = next((index for index, stage in enumerate(task["stages"]) if stage["stage_id"] == start_stage), None)
+        if start_index is None:
+            valid = ", ".join(stage["stage_id"] for stage in task["stages"])
+            raise ApimartError(f"--start-stage must be one of: {valid}")
     if args.last_stage:
         stage_index = next((index for index, stage in enumerate(task["stages"]) if stage["stage_id"] == args.last_stage), None)
         if stage_index is None:
             valid = ", ".join(stage["stage_id"] for stage in task["stages"])
             raise ApimartError(f"--last-stage must be one of: {valid}")
         task["stages"] = task["stages"][:stage_index + 1]
+    if start_index >= len(task["stages"]):
+        raise ApimartError("--start-stage must not be after --last-stage")
     args.out_dir.mkdir(parents=True, exist_ok=True)
     args.media_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = args.out_dir / "sequence_manifest.json"
@@ -83,7 +122,13 @@ def main() -> int:
             raise ApimartError(f"prepared initial video is not 1344x768/107-frame/24fps: {prepared_initial}")
         if not has_audio(prepared_initial):
             raise ApimartError(f"prepared initial video has no audio track: {prepared_initial}")
-        geometry = load_geometry_sidecar(prepared_initial)
+        try:
+            geometry = load_geometry_sidecar(prepared_initial)
+        except ApimartError:
+            # A normalized output from an earlier stage is also a valid H3
+            # canvas when launching a targeted rerun. Its sidecar carries the
+            # stage_input role rather than initial_input.
+            geometry = load_geometry_sidecar(prepared_initial, role="stage_input")
     else:
         geometry = source_canvas_geometry(task["source_video"])
     manifest["normalization"] = {
@@ -109,6 +154,20 @@ def main() -> int:
         if backend == "online"
         else str(parent.resolve())
     )
+    if start_index:
+        previous_stage = task["stages"][start_index - 1]["stage_id"] if start_index < len(task["stages"]) else f"S{start_index}"
+        previous_output = args.out_dir / "stages" / previous_stage / "output.mp4"
+        if not previous_output.is_file() or not is_aligned_video(previous_output):
+            raise ApimartError(
+                f"cannot start at {args.start_stage}: completed output for {previous_stage} is missing or invalid: {previous_output}"
+            )
+        parent = previous_output
+        parent_url = (
+            str(parent.resolve())
+            if backend == "local"
+            else public_url(args.media_public_base_url, parent.name)
+        )
+        task["stages"] = task["stages"][start_index:]
     if args.dry_run:
         for stage in task["stages"]:
             manifest["stages"].append({"stage": stage["stage_id"], "prompt": stage["prompt"], "policy": reference_policy(stage["prompt"], args.global_style_reference_count)})
@@ -171,8 +230,15 @@ def main() -> int:
         stage_parent_url = parent_url
         attempts = load_archived_attempts(stage_dir)
         retry_index = len(attempts)
+        if retry_index > STAGE_RETRY_LIMIT:
+            raise ApimartError(
+                f"stage {stage_label} has {retry_index} archived retries; "
+                f"the fixed retry limit is {STAGE_RETRY_LIMIT}"
+            )
         repair_context: dict[str, Any] | None = None
         observation_pending = False
+        propagated_failed_output = False
+        observer_skipped_on_retry = False
         if attempts:
             prior = attempts[-1]
             saved_repair = prior.get("repair")
@@ -217,11 +283,6 @@ def main() -> int:
                     raise ApimartError(f"legacy fallback cannot be resumed for {stage_label}: {error}") from error
 
         while True:
-            active_reference_count = (
-                int(repair_context["reference_image_count"])
-                if repair_context is not None
-                else args.global_style_reference_count
-            )
             bridge_failure_observation = (
                 str(repair_context.get("observer_evidence", ""))
                 if repair_context is not None else None
@@ -233,12 +294,17 @@ def main() -> int:
                 stage_parent_video,
                 stage_dir,
                 raw_prompt,
-                active_reference_count,
+                # This argument controls only the ordinary static policy.
+                # A repair context carries its own count, including zero for
+                # video-only motion repairs, and bridge_for_stage applies it
+                # after validating the ordinary policy.
+                args.global_style_reference_count,
                 args.media_public_base_url,
                 args.media_dir,
                 task["task_id"],
                 bridge_failure_observation,
                 repair_context,
+                geometry=geometry,
             )
             if apimart.is_ctmoai:
                 reusable_url = reusable_h3_video_url(state_path, h3_prompt, image_urls)
@@ -259,6 +325,41 @@ def main() -> int:
             )
             if not is_aligned_video(output):
                 raise ApimartError(f"completed stage output is invalid: {output}")
+
+            # A retry is the bounded repair attempt for this stage.  Its output
+            # must use the immutable stage parent above, but it is deliberately
+            # not sent through Observer again: the retry result is propagated
+            # as the next stage's parent and remains explicitly marked as
+            # unverified in the manifest.
+            if retry_index > 0:
+                retry_observation = {
+                    "success": None,
+                    "failure_type": "observer_skipped_retry",
+                    "observation": "Retry output propagated without a second Observer call.",
+                    "confidence": 0.0,
+                }
+                attempt_record: dict[str, Any] = {
+                    "attempt": retry_index + 1,
+                    "reference_image_count": len(image_urls),
+                    "h3_input_video": str(stage_parent_video),
+                    "h3_input_video_url": stage_input_url,
+                    "h3_prompt": h3_prompt,
+                    "output": str(output),
+                    "observation": retry_observation,
+                    "post_edit_observation": retry_observation,
+                    "observer_skipped": True,
+                    # Preserve the diagnosis that authorized this retry so
+                    # the stage-level manifest remains actionable even though
+                    # this final attempt has no new Observer diagnosis.
+                    "diagnosis": attempts[-1].get("diagnosis") if attempts else None,
+                    "repair": repair_context,
+                    "policy": base_policy,
+                }
+                attempts.append(attempt_record)
+                observation = retry_observation
+                propagated_failed_output = True
+                observer_skipped_on_retry = True
+                break
 
             observation = load_current_observation(stage_dir, stage_label)
             if observation is None:
@@ -432,23 +533,22 @@ def main() -> int:
             ),
             None,
         )
-        if (
-            apimart.is_ctmoai
-            and isinstance(saved_next_url, str)
-            and saved_next_url.startswith(apimart.base_url.rstrip("/") + "/sd-media/")
-        ):
-            parent_url = saved_next_url
-        else:
-            parent_url = (
-                apimart.upload_media(parent, "videos")
-                if apimart.is_ctmoai
-                else public_url(args.media_public_base_url, parent.name)
-            )
+        parent_url = next_parent_video_url(
+            apimart,
+            parent,
+            saved_next_url,
+            args.media_public_base_url,
+            backend,
+        )
         reference_escalated = any(int(item.get("reference_image_count", 0) or 0) == 3 for item in attempts)
         entry = {
             "stage": stage_label,
             "raw_prompt": raw_prompt,
-            "status": "observation_pending" if observation_pending else "success",
+            "status": (
+                "semantic_failure_propagated"
+                if propagated_failed_output
+                else "observation_pending" if observation_pending else "success"
+            ),
             "h3_prompt": h3_prompt,
             "output": str(output),
             "media": str(media_output),
@@ -462,11 +562,16 @@ def main() -> int:
             "attempts": attempts,
             "diagnosis": attempts[-1].get("diagnosis"),
             "repair": repair_context,
+            "propagated_failed_output": propagated_failed_output,
+            "observer_skipped": observer_skipped_on_retry,
         }
         if bridge:
             entry["bridge"] = bridge
         replace_manifest_stage(manifest, entry)
-        manifest["status"] = "observation_pending" if observation_pending else "running"
+        manifest["status"] = (
+            "degraded" if propagated_failed_output
+            else "observation_pending" if observation_pending else "running"
+        )
         write_json(manifest_path, manifest)
         print(json.dumps({"event": "stage_complete", "stage": stage_label, "output": str(output), "reference_escalated": reference_escalated, "attempts": len(attempts)}, ensure_ascii=False), flush=True)
     final = args.out_dir / "output.mp4"
@@ -480,8 +585,13 @@ def main() -> int:
     ):
         materialize_final_video(parent, final, geometry)
     manifest["output"] = str(final)
+    has_propagated_failure = any(
+        isinstance(item, Mapping) and item.get("propagated_failed_output") is True
+        for item in manifest.get("stages", [])
+    )
     manifest["status"] = (
-        "observation_pending"
+        "degraded" if has_propagated_failure
+        else "observation_pending"
         if any(
             isinstance(item, Mapping) and item.get("status") == "observation_pending"
             for item in manifest.get("stages", [])

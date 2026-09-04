@@ -61,6 +61,68 @@ def render_prompt(name: str, **values: Any) -> str:
     return rendered.strip()
 
 
+def image_edit_prompt(raw_prompt: str) -> str:
+    """Add the shared preservation constraint to an image-edit request.
+
+    The atomic requirement remains the source of all requested changes.  This
+    clause only tells the image editor not to redesign unrelated content in
+    the reference frame.
+    """
+
+    requirement = " ".join(str(raw_prompt).split()).strip()
+    if not requirement:
+        raise PromptResourceError("image edit prompt requires a non-empty atomic requirement")
+    preservation = load_prompt("image_edit_preservation.txt").strip()
+    if preservation.lower() in requirement.lower():
+        return requirement
+    return f"{requirement} {preservation}"
+
+
+def camera_motion_prompt(raw_prompt: str) -> str:
+    """Append only the physical-camera clarification for the named movement."""
+
+    requirement = " ".join(str(raw_prompt).split()).strip()
+    if not requirement:
+        raise PromptResourceError("camera motion prompt requires a non-empty atomic requirement")
+    # Imported lazily to keep the policy module independent from resources.
+    from ..core.policy import camera_motion_kind
+
+    motion_kind = camera_motion_kind(requirement)
+    if motion_kind is None:
+        return requirement
+    try:
+        clauses = json.loads(load_prompt("h3_camera_motion_clauses.json"))
+    except json.JSONDecodeError as error:
+        raise PromptResourceError("h3_camera_motion_clauses.json is not valid JSON") from error
+    if not isinstance(clauses, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str) or not value.strip()
+        for key, value in clauses.items()
+    ):
+        raise PromptResourceError(
+            "h3_camera_motion_clauses.json must map movement names to non-empty strings"
+        )
+    common = load_prompt("h3_camera_motion_contract.txt").strip()
+    specific = str(clauses.get(motion_kind, clauses.get("generic", ""))).strip()
+    if not specific:
+        raise PromptResourceError(f"camera motion resource lacks clause for {motion_kind!r}")
+    contract = f"{specific} {common}".strip()
+    if contract.lower() in requirement.lower():
+        return requirement
+    return f"{requirement} {contract}"
+
+
+def dynamic_action_prompt(raw_prompt: str) -> str:
+    """Append the temporal-onset contract for a pure action/pose edit."""
+
+    requirement = " ".join(str(raw_prompt).split()).strip()
+    if not requirement:
+        raise PromptResourceError("dynamic action prompt requires a non-empty atomic requirement")
+    contract = load_prompt("h3_dynamic_action_contract.txt").strip()
+    if contract.lower() in requirement.lower():
+        return requirement
+    return f"{requirement} {contract}"
+
+
 def load_repair_clauses() -> dict[str, str]:
     """Load the closed repair-action clause table from package data."""
 
@@ -76,4 +138,12 @@ def load_repair_clauses() -> dict[str, str]:
     return {key: clause.strip() for key, clause in value.items()}
 
 
-__all__ = ["PromptResourceError", "load_prompt", "render_prompt", "load_repair_clauses"]
+__all__ = [
+    "PromptResourceError",
+    "load_prompt",
+    "render_prompt",
+    "image_edit_prompt",
+    "camera_motion_prompt",
+    "dynamic_action_prompt",
+    "load_repair_clauses",
+]

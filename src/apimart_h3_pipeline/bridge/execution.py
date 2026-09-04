@@ -12,10 +12,14 @@ from ..core.constants import (
     BRIDGE_KIND, DEFAULT_STATIC_REFERENCE_COUNT, GLOBAL_STYLE_REFERENCE_COUNT, PRIMARY_REFERENCE_FRAME_INDEX,
     QWEN_CONTEXT_FRAME_INDICES, TEMPORAL_END_FRAME_INDEX, TEMPORAL_MIDDLE_FRAME_INDEX, PROMPT_KEY,
 )
-from ..providers.grsai import GrsaiImageEditor
-from ..media import select_keyframe
-from ..media import read_json
-from ..core.policy import expected_reference_roles, normalized_prompt, reference_policy, reference_roles_match_policy, validate_h3_reference_tags
+from ..providers.grsai import GRSAI_IMAGE_MODEL, GrsaiImageEditor, image_model_for_stage
+from ..media import CanvasGeometry, read_json, select_keyframe
+from ..core.policy import expected_reference_roles, is_camera_motion_edit, is_dynamic_action_edit, normalized_prompt, reference_policy
+from ..resources.catalog import (
+    camera_motion_prompt,
+    dynamic_action_prompt,
+    image_edit_prompt,
+)
 from ..providers.vision_refiner import DashScopeVisionRefiner
 
 from .helpers import (
@@ -31,6 +35,39 @@ from .helpers import (
 )
 
 
+def _edit_reference_image(
+    editor: GrsaiImageEditor,
+    *,
+    canvas_input: Path,
+    raw_prompt: str,
+    edit_prompt: str,
+    output: Path,
+    state_path: Path,
+    geometry: CanvasGeometry | None,
+    style_reference: Path | None = None,
+) -> tuple[dict[str, Any], Path]:
+    """Edit one H3 canvas frame exactly once and return it as the master."""
+
+    state = dict(editor.edit(
+        canvas_input,
+        raw_prompt,
+        edit_prompt,
+        output,
+        state_path,
+        style_reference=style_reference,
+    ))
+    state.update({
+        "model": getattr(editor, "model", GRSAI_IMAGE_MODEL),
+        "edit_input": str(canvas_input),
+        "content_output": str(output),
+        "output": str(output),
+        "style_reference": str(style_reference) if style_reference else None,
+    })
+    if geometry is not None:
+        state["reference_geometry"] = geometry.as_dict()
+    return state, output
+
+
 def bridge_for_stage(
     refiner: DashScopeVisionRefiner,
     editor: GrsaiImageEditor,
@@ -44,7 +81,11 @@ def bridge_for_stage(
     task_id: str | None = None,
     failure_observation: str | None = None,
     repair_context: Mapping[str, Any] | None = None,
+    geometry: CanvasGeometry | None = None,
 ) -> tuple[list[str], str, dict[str, Any]]:
+    stage_label = stage_dir.name
+    image_edit_model = image_model_for_stage(stage_label)
+    editor.model = image_edit_model
     base_policy = reference_policy(next_prompt, global_style_reference_count)
     repair_context = dict(repair_context) if repair_context is not None else None
     if repair_context is not None:
@@ -65,7 +106,6 @@ def bridge_for_stage(
     failure_observation = normalized_prompt(failure_observation or "") or None
     bridge_dir = stage_dir / "bridge_for_next"
     bridge_path = bridge_dir / "bridge.json"
-    stage_label = stage_dir.name
     file_prefix = f"task_{task_id or 'unknown'}_{stage_label}"
     if bridge_path.is_file():
         bridge = read_json(bridge_path)
@@ -78,10 +118,6 @@ def bridge_for_stage(
         first_frame_reference = (
             expected_count == 0
             or saved_selected_frame == PRIMARY_REFERENCE_FRAME_INDEX
-        )
-        role_contract_matches = (
-            expected_count == 0
-            or reference_roles_match_policy(bridge.get("reference_roles"), expected_count)
         )
         if (
             bridge.get("kind") == BRIDGE_KIND
@@ -96,17 +132,23 @@ def bridge_for_stage(
             and final_refiner_metadata.get("model") == refiner.model
             and bridge.get("failure_observation") == failure_observation
             and bridge.get("repair_context") == repair_context
+            and bridge.get("reference_geometry") == (
+                geometry.as_dict() if geometry is not None else None
+            )
+            and (
+                not bool(policy["needs_reference_image"])
+                or bridge.get("image_edit_model", GRSAI_IMAGE_MODEL) == image_edit_model
+            )
             and first_frame_reference
-            and role_contract_matches
+            and (
+                not is_camera_motion_edit(next_prompt)
+                or h3_prompt == normalized_prompt(next_prompt)
+            )
         ):
             if not isinstance(image_urls, list) or not all(isinstance(url, str) for url in image_urls):
                 raise ApimartError("reusable bridge has invalid reference image URLs")
             if len(image_urls) > expected_count:
                 raise ApimartError("reusable bridge has more image URLs than its reference policy")
-            saved_reference_roles = bridge.get("reference_roles", ())
-            if not isinstance(saved_reference_roles, list):
-                saved_reference_roles = ()
-            validate_h3_reference_tags(h3_prompt, expected_count, saved_reference_roles)
             # Refresh provider-facing URLs from durable local images. This also
             # resumes a bridge interrupted between image editing and upload.
             if apimart.is_ctmoai:
@@ -204,6 +246,8 @@ def bridge_for_stage(
                 "selected_frame_index": selected_frame_index,
                 "archived_output": str(archived_primary),
                 "output": str(primary_reference),
+                "content_output": str(primary_reference),
+                "edit_input": str(primary_reference),
             }
         else:
             reference_plan_path = bridge_dir / f"{file_prefix}_qwen_reference_plan.json"
@@ -236,8 +280,8 @@ def bridge_for_stage(
             # let Qwen paraphrase the image instruction.  Normalize it here
             # as well as in plan_reference so resume cannot reintroduce extra
             # edits into the image-editor request.
-            reference_plan["image_edit_prompt"] = next_prompt.strip()
-            reference_plan["image_edit_prompt_source"] = "raw_atomic_prompt_verbatim"
+            reference_plan["image_edit_prompt"] = image_edit_prompt(next_prompt)
+            reference_plan["image_edit_prompt_source"] = "raw_atomic_prompt_with_preservation_constraint"
             selected_frame_index = int(reference_plan["selected_frame_index"])
             if selected_frame_index != PRIMARY_REFERENCE_FRAME_INDEX:
                 raise ApimartError(
@@ -245,12 +289,16 @@ def bridge_for_stage(
                     f"{selected_frame_index} != {PRIMARY_REFERENCE_FRAME_INDEX}"
                 )
             primary_reference = bridge_dir / f"{file_prefix}_reference_frame_{selected_frame_index:03d}.png"
-            primary_edit_state = editor.edit(
-                context_by_index[selected_frame_index],
-                next_prompt,
-                str(reference_plan["image_edit_prompt"]),
-                primary_reference,
-                bridge_dir / f"{file_prefix}_image_edit_state_frame_{selected_frame_index:03d}.json",
+            primary_edit_input = context_by_index[selected_frame_index]
+            primary_edit_output = primary_reference
+            primary_edit_state, _ = _edit_reference_image(
+                editor,
+                canvas_input=primary_edit_input,
+                raw_prompt=next_prompt,
+                edit_prompt=str(reference_plan["image_edit_prompt"]),
+                output=primary_edit_output,
+                state_path=bridge_dir / f"{file_prefix}_image_edit_state_frame_{selected_frame_index:03d}.json",
+                geometry=geometry,
             )
 
         if reference_count == 1:
@@ -294,9 +342,9 @@ def bridge_for_stage(
                     "primary_reference": str(primary_reference),
                     "result": three_anchor_plan,
                 })
-            three_anchor_plan["middle_image_edit_prompt"] = next_prompt.strip()
-            three_anchor_plan["end_image_edit_prompt"] = next_prompt.strip()
-            three_anchor_plan["image_edit_prompt_source"] = "raw_atomic_prompt_verbatim"
+            three_anchor_plan["middle_image_edit_prompt"] = image_edit_prompt(next_prompt)
+            three_anchor_plan["end_image_edit_prompt"] = image_edit_prompt(next_prompt)
+            three_anchor_plan["image_edit_prompt_source"] = "raw_atomic_prompt_with_preservation_constraint"
             # The first-frame primary is the shared style master. The middle
             # and end anchors are edited from their own parent frames while
             # receiving that first-frame image as an explicit style reference.
@@ -304,21 +352,30 @@ def bridge_for_stage(
             end_frame_index = TEMPORAL_END_FRAME_INDEX
             middle_reference = bridge_dir / f"{file_prefix}_reference_frame_{middle_frame_index:03d}.png"
             end_reference = bridge_dir / f"{file_prefix}_reference_frame_{end_frame_index:03d}.png"
-            middle_edit_state = editor.edit(
-                context_by_index[middle_frame_index],
-                next_prompt,
-                str(three_anchor_plan["middle_image_edit_prompt"]),
-                middle_reference,
-                bridge_dir / f"{file_prefix}_image_edit_state_frame_{middle_frame_index:03d}.json",
-                style_reference=primary_reference,
+            middle_edit_input = context_by_index[middle_frame_index]
+            end_edit_input = context_by_index[end_frame_index]
+            middle_edit_output = middle_reference
+            end_edit_output = end_reference
+            style_reference = primary_reference
+            middle_edit_state, _ = _edit_reference_image(
+                editor,
+                canvas_input=middle_edit_input,
+                raw_prompt=next_prompt,
+                edit_prompt=str(three_anchor_plan["middle_image_edit_prompt"]),
+                output=middle_edit_output,
+                state_path=bridge_dir / f"{file_prefix}_image_edit_state_frame_{middle_frame_index:03d}.json",
+                geometry=geometry,
+                style_reference=style_reference,
             )
-            end_edit_state = editor.edit(
-                context_by_index[end_frame_index],
-                next_prompt,
-                str(three_anchor_plan["end_image_edit_prompt"]),
-                end_reference,
-                bridge_dir / f"{file_prefix}_image_edit_state_frame_{end_frame_index:03d}.json",
-                style_reference=primary_reference,
+            end_edit_state, _ = _edit_reference_image(
+                editor,
+                canvas_input=end_edit_input,
+                raw_prompt=next_prompt,
+                edit_prompt=str(three_anchor_plan["end_image_edit_prompt"]),
+                output=end_edit_output,
+                state_path=bridge_dir / f"{file_prefix}_image_edit_state_frame_{end_frame_index:03d}.json",
+                geometry=geometry,
+                style_reference=style_reference,
             )
             # Picture numbering is semantic and stable: first-frame style
             # master, middle temporal anchor, then end temporal anchor.
@@ -328,7 +385,22 @@ def bridge_for_stage(
         else:
             raise ApimartError(f"unsupported reference image count: {reference_count}")
 
-    if repair_context is not None and repair_context.get("mode") != "fixed_three_anchor":
+    if is_camera_motion_edit(next_prompt):
+        # Physical camera edits are most reliable when MiniMax-H3 receives
+        # the user's atomic requirement verbatim.  Do not let either Qwen-VL
+        # reformulation or the generic camera contract dilute that request.
+        h3_prompt = normalized_prompt(next_prompt)
+        final_refinement = {
+            "model": refiner.model,
+            "h3_prompt": h3_prompt,
+            "h3_prompt_source": "raw_camera_requirement",
+            "frame_observation": "camera requirement passed through verbatim",
+            "picture_count": len(reference_images),
+            "is_global_style": bool(policy.get("is_global_style")),
+            "repair_action": repair_context.get("repair_action") if repair_context else None,
+            "usage": {},
+        }
+    elif repair_context is not None and repair_context.get("mode") != "fixed_three_anchor":
         h3_prompt = deterministic_repair_h3_prompt(
             next_prompt,
             len(reference_images),
@@ -367,6 +439,8 @@ def bridge_for_stage(
         "reference_roles": reference_roles,
         "failure_observation": failure_observation,
         "repair_context": repair_context,
+        "reference_geometry": geometry.as_dict() if geometry is not None else None,
+        "image_edit_model": image_edit_model,
         "selection_reason": reference_plan.get("selection_reason", ""),
         "h3_prompt": h3_prompt,
         "refiner": reference_plan,

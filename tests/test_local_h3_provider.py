@@ -120,6 +120,9 @@ def test_generate_materializes_files_and_resumes_saved_prompt(tmp_path: Path) ->
     assert [path for path, _ in fake.calls] == ["/prompt", "/history/local-prompt"]
     state = json.loads((tmp_path / "stage" / "local_task_state.json").read_text(encoding="utf-8"))
     assert state["prompt_id"] == "local-prompt"
+    token = LocalH3Client._scoped_token(tmp_path / "stage", "S1")
+    assert state["request"]["input_name"] == f"{token}_input.mp4"
+    assert state["request"]["reference_names"] == [f"{token}_reference_1.png"]
 
     resumed = FakeClient(fake.config)
     resumed.generate(
@@ -131,6 +134,18 @@ def test_generate_materializes_files_and_resumes_saved_prompt(tmp_path: Path) ->
         stage_id="S1",
     )
     assert [path for path, _ in resumed.calls] == ["/history/local-prompt"]
+
+
+def test_scoped_materialization_keeps_queued_task_inputs_distinct(tmp_path: Path) -> None:
+    first = tmp_path / "tasks" / "task_001" / "stages" / "S1"
+    second = tmp_path / "tasks" / "task_002" / "stages" / "S1"
+
+    first_token = LocalH3Client._scoped_token(first, "S1")
+    second_token = LocalH3Client._scoped_token(second, "S1")
+
+    assert first_token == "task_001_S1"
+    assert second_token == "task_002_S1"
+    assert first_token != second_token
 
 
 def test_local_media_adapter_returns_a_file_url(tmp_path: Path) -> None:

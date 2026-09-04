@@ -27,7 +27,8 @@ MiniMax-H3 输出
     -> failure_type
     -> 只修复该类型对应的 prompt/reference 部分
     -> 同一个 stage 重试
-    -> 再观察；仍失败则停止传播并记录 semantic_failure
+    -> retry 输出只做媒体合法性检查，不再二次 Observer；
+       标记 semantic_failure_propagated 后传给下一 stage
 ```
 
 这不是重新规划器，也不是对失败结果进行自由发挥。它只在已经冻结的 `sequential_nominal_plan` 内工作：
@@ -37,7 +38,9 @@ MiniMax-H3 输出
 - 只能增加针对失败的连续性或可见性约束，不能增加新的对象、动作、风格、镜头或音频 requirement；
 - 不重排 stage，不修改 DAG、CLT、CEG 或编译计划；
 - 每个 stage 固定只进行 1 次定向修复，不提供额外重试配置；
-- 修复失败不能把未确认的视频静默当作成功父状态传给下一 stage。
+- 首轮不可修复失败仍停止；一旦已发起 bounded retry，retry 输出可作为降级 parent
+  传给下一 stage，但必须显式记录 `observer_skipped`、`propagated_failed_output`
+  和 `semantic_failure_propagated`，不能伪装成语义成功。
 
 ### 1.1 研究想法的迁移边界
 
@@ -131,7 +134,9 @@ MiniMax-H3 输出
 - bridge cache 同时比较 `failure_observation` 和完整 `repair_context`，不同 failure type/action/retry 不会误复用。
 - video-only repair 使用确定性模板，不为被丢弃的 paraphrase 支付额外 Qwen compose 调用。
 - 图片编辑始终使用原始 `raw_prompt`；`repaired_h3_prompt` 只用于 H3，不会改变 GRSAI 的语义范围。
-- `attempt_N`、显式 `retry_index=1` 和归档 bridge 支持一次定向修复；第一次 retry 失败后停止传播，并可恢复首帧 primary anchor。
+- `attempt_1` 是首轮输出，失败后归档；`attempt_2` 是唯一 bounded retry。retry
+  使用同一 stage 的原始 parent，生成后不再调用 Observer，直接物化并传播到下一
+  stage，同时保留诊断、repair 和归档证据。
 
 这些约束仍属于执行层；repair 组件不修改 compiled plan 或 MSR 控制器。
 
@@ -298,7 +303,7 @@ strengthen_composition:
 - `edit_missing`：先重写当前 H3 prompt，通常复用一张内容对齐主参考图；
 - `identity_drift`：先加强 identity preservation，只有跨时间外观也漂移时才升级三锚点；
 - `previous_stage_lost`：先加入已确认父 stage 的 preservation summary，不立即生成三张图；
-- `motion_weak`：不生成图片，保持 `video_only`，加强原有 motion wording；
+- `motion_weak`：不生成图片，保持 `video_only`，加强原有 motion wording；纯动作/姿态 stage 的首次执行也保持 `video_only`，不把目标姿态制作成首帧静态参考；
 - `composition_weak`：保留原 reference policy，强调目标位置/关系；
 - `style_inconsistency`：直接使用上下文首帧/中间帧/上下文末帧三锚点；中间帧和末帧的 GRSAI 编辑都传入首帧 primary style master。
 
@@ -534,8 +539,8 @@ observer_unavailable               -> observation_pending -> 不自动宣称成�
 | 不回写 CLT/CEG | repair 组件无控制层写权限；guard 字段必须为 false |
 | 只保留已确认父 stage | `previous_requirements` 来自 manifest 中 confirmed stages |
 | retry 输入不漂移 | 同一 stage 的所有 attempt 固定使用 `stage_parent_video`/`stage_parent_url`；失败输出只归档，不回写 parent |
-| 重试有上限 | `retry_index == 1`；第二次失败后停止传播 |
-| 语义失败不传播 | `semantic_failure` 不更新 `parent` |
+| 重试有上限 | `retry_index == 1`；每 stage 最多一次 retry |
+| retry 失败传播 | 已发起 retry 时，retry 输出标记 `semantic_failure_propagated` 后更新下一 stage 的 `parent` |
 | media/API 失败与语义失败分开 | 状态使用 `execution_failure`/`semantic_failure`/`observation_pending` |
 
 对于“不能添加新 requirement”的解释应写入测试和代码注释：`strengthen_identity_preservation`、`strengthen_previous_stage_preservation` 属于对已有内容的保持约束；它们不能引入新对象、新人数、新动作或新的视觉风格。
@@ -556,7 +561,8 @@ observer_unavailable               -> observation_pending -> 不自动宣称成�
 - 按动作表只修复失败部分；
 - 只有 `style_inconsistency` 等类型才使用三锚点；
 - 每个 stage 默认最多一次定向修复；
-- 第二次仍失败时停止传播。
+- retry 只做媒体合法性检查，不再二次 Observer；输出标记为
+  `semantic_failure_propagated` 后继续传播，sequence 以 `degraded` 结束。
 
 两个实验臂必须固定：源视频、compiled plan、stage 顺序、H3 model、GRSAI model、Qwen model、duration、seed（若 provider 支持）、媒体规格和超时。使用相同任务集合，最好以 task-stage 为单位配对比较。
 
@@ -630,7 +636,8 @@ observer_unavailable               -> observation_pending -> 不自动宣称成�
 
 ### Phase 4：严格语义传播闸门（已完成，待线上验证）
 
-- 任何最终 `success=false` 都停止当前任务，不更新 parent；
+- 首轮不可修复的 `success=false` 停止当前任务；已发起 retry 的 stage 跳过二次
+  Observer，retry 输出作为降级 parent 继续执行；
 - `observer_unavailable` 进入 `observation_pending`，由离线视频级复核决定；
 - 上层仍可选择回到最近的依赖祖先，但该回溯属于控制层显式决策，不能由 repair 组件偷偷改拓扑。
 

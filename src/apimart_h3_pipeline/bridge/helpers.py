@@ -26,8 +26,8 @@ from ..core.constants import (
     TEMPORAL_MIDDLE_FRAME_INDEX,
 )
 from ..media import read_json
-from ..core.policy import expected_reference_roles, normalized_prompt, validate_h3_reference_tags
-from ..resources.catalog import PromptResourceError, render_prompt
+from ..core.policy import expected_reference_roles, is_camera_motion_edit, is_dynamic_action_edit, normalized_prompt
+from ..resources.catalog import PromptResourceError, camera_motion_prompt, dynamic_action_prompt, image_edit_prompt, render_prompt
 
 
 def load_task(compiled_jobs: Path, task_id: str) -> dict[str, Any]:
@@ -219,7 +219,7 @@ def temporal_anchor_h3_prompt(
         )
     except PromptResourceError as error:
         raise ApimartError(str(error)) from error
-    return validate_h3_reference_tags(prompt, GLOBAL_STYLE_REFERENCE_COUNT, reference_roles)
+    return prompt
 
 
 def three_anchor_reference_plan(
@@ -244,9 +244,9 @@ def three_anchor_reference_plan(
         "style_reference_frame_index": PRIMARY_REFERENCE_FRAME_INDEX,
         "middle_frame_index": TEMPORAL_MIDDLE_FRAME_INDEX,
         "end_frame_index": TEMPORAL_END_FRAME_INDEX,
-        "middle_image_edit_prompt": requirement,
-        "end_image_edit_prompt": requirement,
-        "image_edit_prompt_source": "raw_atomic_prompt_verbatim",
+        "middle_image_edit_prompt": image_edit_prompt(requirement),
+        "end_image_edit_prompt": image_edit_prompt(requirement),
+        "image_edit_prompt_source": "raw_atomic_prompt_with_preservation_constraint",
         "is_global_style": is_global_style,
         "frame_observation": (
             "the first-frame primary is the shared style master; middle and end anchors "
@@ -268,7 +268,12 @@ def deterministic_repair_h3_prompt(
         raise ApimartError(f"unsupported repair reference count: {picture_count}")
     try:
         if picture_count == 0:
-            base = render_prompt("h3_video_only_repair.txt", requirement=raw_prompt.strip())
+            requirement = (
+                dynamic_action_prompt(raw_prompt)
+                if is_dynamic_action_edit(raw_prompt)
+                else raw_prompt.strip()
+            )
+            base = render_prompt("h3_video_only_repair.txt", requirement=requirement)
         elif picture_count == 1:
             base = render_prompt("h3_one_anchor_repair.txt", requirement=raw_prompt.strip())
         else:
@@ -284,7 +289,9 @@ def deterministic_repair_h3_prompt(
             repair=repair_context,
             picture_count=picture_count,
         )
-        return validate_h3_reference_tags(repaired, picture_count, reference_roles)
+        if is_camera_motion_edit(raw_prompt):
+            repaired = camera_motion_prompt(repaired)
+        return repaired
     except RepairValidationError as error:
         raise ApimartError(str(error)) from error
 

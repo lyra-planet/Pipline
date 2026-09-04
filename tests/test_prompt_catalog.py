@@ -33,12 +33,15 @@ PROMPT_FILES = (
     "qwen_h3_global_style_suffix.txt",
     "qwen_h3_failure_evidence.txt",
     "qwen_h3_user.txt",
-    "qwen_h3_validation_retry.txt",
     "qwen_observer_system.txt",
     "qwen_observer_user.txt",
     "h3_temporal_anchor.txt",
     "h3_one_anchor_repair.txt",
     "h3_video_only_repair.txt",
+    "h3_dynamic_action_contract.txt",
+    "h3_camera_motion_contract.txt",
+    "h3_camera_motion_clauses.json",
+    "image_edit_preservation.txt",
     "repair_clauses.json",
 )
 
@@ -69,6 +72,19 @@ def test_render_prompt_requires_all_template_values() -> None:
     assert "anchors" in rendered
 
 
+def test_qwen_h3_prompt_contract_puts_operation_before_references() -> None:
+    system = load_prompt("qwen_h3_system.txt")
+    user = render_prompt("qwen_h3_user.txt", raw_prompt="Move the camera slowly to the right.")
+    contract = render_prompt(
+        "qwen_h3_reference_contract.txt",
+        picture_tags="<Picture 1>",
+        role_contract="<Picture 1> = edited primary anchor, source frame 0",
+    )
+    assert "Begin h3_prompt with the exact raw atomic requirement text verbatim" in system
+    assert user.index("Start h3_prompt with the raw atomic edit requirement") < user.index("Only after")
+    assert contract.index("first sentence must state the raw operation") < contract.index("assign appearance")
+
+
 def test_three_anchor_resource_contains_the_frame_lock_contract() -> None:
     rendered = render_prompt(
         "qwen_h3_reference_contract.txt",
@@ -83,6 +99,7 @@ def test_three_anchor_resource_contains_the_frame_lock_contract() -> None:
     assert "source frame 0" in rendered
     assert "source frame 53" in rendered
     assert "source frame 106" in rendered
+    assert "first sentence must state the raw operation" in rendered
 
 
 def test_repair_clause_actions_are_a_closed_nonempty_mapping() -> None:
@@ -97,3 +114,35 @@ def test_repair_clause_actions_are_a_closed_nonempty_mapping() -> None:
     }
     assert set(clauses) == expected
     assert all(value.strip() for value in clauses.values())
+
+
+def test_image_edit_prompt_adds_only_the_shared_preservation_constraint() -> None:
+    from apimart_h3_pipeline.prompt_catalog import image_edit_prompt
+
+    raw = "Transform the background to a dimly lit room."
+    rendered = image_edit_prompt(raw)
+    assert rendered.startswith(raw)
+    assert rendered.endswith("Preserve all other elements exactly as they are.")
+    assert image_edit_prompt(rendered) == rendered
+
+
+def test_reference_planner_contract_matches_image_editor_prompt_policy() -> None:
+    rendered = load_prompt("qwen_reference_system.txt")
+    assert "raw atomic requirement plus the shared instruction" in rendered
+    assert "raw atomic requirement verbatim" not in rendered
+
+
+def test_camera_motion_contract_is_explicit_about_pan_vs_zoom() -> None:
+    rendered = render_prompt("h3_camera_motion_contract.txt")
+    assert "requested camera movement" in rendered
+    assert "object motion" in rendered
+
+
+def test_dynamic_action_contract_is_temporal_and_idempotent() -> None:
+    from apimart_h3_pipeline.prompt_catalog import dynamic_action_prompt
+
+    raw = "Change the girl's action to a high vertical jump with arms outstretched."
+    rendered = dynamic_action_prompt(raw)
+    assert rendered.startswith(raw)
+    assert "natural onset and progression" in rendered
+    assert dynamic_action_prompt(rendered) == rendered

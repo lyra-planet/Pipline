@@ -83,6 +83,7 @@ class FakeEditor:
 
     def edit(
         self, image, raw_prompt, image_edit_prompt, output, state_path, style_reference=None,
+        aspect_ratio=None,
     ):
         output.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(image, output)
@@ -92,6 +93,7 @@ class FakeEditor:
             "image_edit_prompt": image_edit_prompt,
             "output": str(output),
             "style_reference": str(style_reference) if style_reference else None,
+            "aspect_ratio": aspect_ratio,
         }
         self.calls.append(call)
         return {"status": "succeeded", **call}
@@ -101,6 +103,7 @@ class FakeCtmoai:
     is_ctmoai = True
 
     def __init__(self) -> None:
+        self.base_url = "https://api.invalid"
         self.uploads: list[str] = []
 
     def upload_media(self, image, media_type):
@@ -115,6 +118,53 @@ def fake_select_keyframe(video: Path, output: Path, frame_index: int = 53) -> No
 
 
 class H3MultiframeBridgeTests(unittest.TestCase):
+    def test_s1_image_editor_uses_one_letterboxed_canvas_edit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent = root / "parent.mp4"
+            parent.write_bytes(b"test video placeholder")
+            stage_dir = root / "S1"
+            refiner = FakeRefiner()
+            editor = FakeEditor()
+            apimart = FakeCtmoai()
+            geometry = pipeline.compute_canvas_geometry(1016, 1018)
+
+            def fake_h3_keyframe(video: Path, output: Path, frame_index: int = 53) -> None:
+                output.parent.mkdir(parents=True, exist_ok=True)
+                canvas = Image.new(
+                    "RGB",
+                    (pipeline.H3_CANVAS_WIDTH, pipeline.H3_CANVAS_HEIGHT),
+                    "black",
+                )
+                canvas.paste(
+                    Image.new("RGB", (geometry.content_width, geometry.content_height), (frame_index, 20, 30)),
+                    (geometry.offset_x, geometry.offset_y),
+                )
+                canvas.save(output, "PNG")
+
+            with patch.object(pipeline, "select_keyframe", fake_h3_keyframe):
+                _, _, bridge = pipeline.bridge_for_stage(
+                    refiner,
+                    editor,
+                    apimart,
+                    parent,
+                    stage_dir,
+                    "Recolor the background blue.",
+                    1,
+                    task_id="1",
+                    geometry=geometry,
+                )
+
+            self.assertEqual(len(editor.calls), 1)
+            with Image.open(editor.calls[0]["image"]) as image:
+                self.assertEqual(image.size, (pipeline.H3_CANVAS_WIDTH, pipeline.H3_CANVAS_HEIGHT))
+                self.assertEqual(image.getpixel((0, 0)), (0, 0, 0))
+            self.assertIsNone(editor.calls[0]["aspect_ratio"])
+            edit_state = bridge["image_edits"][0]
+            self.assertEqual(edit_state["edit_input"], editor.calls[0]["image"])
+            self.assertEqual(edit_state["content_output"], edit_state["output"])
+            self.assertIsNone(editor.calls[0]["style_reference"])
+
     def test_qwen_reference_planner_requires_first_parent_frame(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -165,7 +215,7 @@ class H3MultiframeBridgeTests(unittest.TestCase):
             with self.assertRaises(pipeline.ApimartError):
                 refiner.plan_reference(
                     context_frames,
-                    "Transform the entire video into a watercolor style.",
+                    "Recolor the background blue.",
                     True,
                 )
 
@@ -218,8 +268,9 @@ class H3MultiframeBridgeTests(unittest.TestCase):
             self.assertIsNotNone(editor.calls[2]["style_reference"])
             self.assertTrue(editor.calls[1]["image"].endswith("_S2_context_frame_053.png"))
             self.assertTrue(editor.calls[2]["image"].endswith("_S2_context_frame_106.png"))
-            self.assertEqual(editor.calls[1]["image_edit_prompt"], raw_prompt)
-            self.assertEqual(editor.calls[2]["image_edit_prompt"], raw_prompt)
+            expected_image_prompt = pipeline.image_edit_prompt(raw_prompt)
+            self.assertEqual(editor.calls[1]["image_edit_prompt"], expected_image_prompt)
+            self.assertEqual(editor.calls[2]["image_edit_prompt"], expected_image_prompt)
             self.assertTrue(str(editor.calls[1]["style_reference"]).endswith("_S2_reference_frame_000.png"))
             self.assertEqual(editor.calls[1]["style_reference"], editor.calls[2]["style_reference"])
             self.assertIn("<Picture 1>", h3_prompt)
@@ -325,6 +376,121 @@ class H3MultiframeBridgeTests(unittest.TestCase):
             self.assertEqual(bridge["final_refiner"]["h3_prompt_source"], "vetra_deterministic_repair")
             self.assertEqual(len(refiner.compositions), 1)
 
+    def test_s1_three_anchor_edit_runs_one_letterboxed_pass_for_each_anchor(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent = root / "parent.mp4"
+            parent.write_bytes(b"test video placeholder")
+            stage_dir = root / "S1"
+            refiner = FakeRefiner()
+            editor = FakeEditor()
+            apimart = FakeCtmoai()
+            geometry = pipeline.compute_canvas_geometry(1016, 1018)
+
+            def fake_h3_keyframe(video: Path, output: Path, frame_index: int = 53) -> None:
+                output.parent.mkdir(parents=True, exist_ok=True)
+                Image.new(
+                    "RGB",
+                    (pipeline.H3_CANVAS_WIDTH, pipeline.H3_CANVAS_HEIGHT),
+                    (frame_index, 20, 30),
+                ).save(output, "PNG")
+
+            with patch.object(pipeline, "select_keyframe", fake_h3_keyframe):
+                _, _, bridge = pipeline.bridge_for_stage(
+                    refiner,
+                    editor,
+                    apimart,
+                    parent,
+                    stage_dir,
+                    "Recolor the background blue.",
+                    global_style_reference_count=3,
+                    task_id="style-single-pass",
+                    geometry=geometry,
+                )
+
+            self.assertEqual(len(editor.calls), 3)
+            self.assertEqual(
+                [Image.open(call["image"]).size for call in editor.calls],
+                [(pipeline.H3_CANVAS_WIDTH, pipeline.H3_CANVAS_HEIGHT)] * 3,
+            )
+            self.assertIsNone(editor.calls[0]["style_reference"])
+            self.assertEqual(editor.calls[1]["style_reference"], editor.calls[0]["output"])
+            self.assertEqual(editor.calls[2]["style_reference"], editor.calls[0]["output"])
+
+    def test_video_only_repair_does_not_validate_zero_as_static_reference_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent = root / "parent.mp4"
+            parent.write_bytes(b"test video placeholder")
+            stage_dir = root / "S2"
+            refiner = FakeRefiner()
+            editor = FakeEditor()
+            apimart = FakeCtmoai()
+            raw_prompt = "Move the camera slowly to the right."
+            repair = pipeline.FailureDiagnosisAndRepair().repair(
+                {
+                    "success": False,
+                    "failure_type": "edit_missing",
+                    "observer_evidence": "The camera remained static.",
+                    "observation": "The camera remained static.",
+                    "confidence": 0.95,
+                    "stage_id": "S2",
+                    "affected_scope": "current_stage_only",
+                    "repairable": True,
+                },
+                stage_id="S2",
+                current_requirement=raw_prompt,
+                failed_prompt="Apply only this edit to <Video 1>: " + raw_prompt,
+                retry_index=1,
+                original_policy={"needs_reference_image": False, "reference_image_count": 0},
+            )
+
+            with patch.object(pipeline, "select_keyframe", fake_select_keyframe):
+                image_urls, h3_prompt, bridge = pipeline.bridge_for_stage(
+                    refiner,
+                    editor,
+                    apimart,
+                    parent,
+                    stage_dir,
+                    raw_prompt,
+                    global_style_reference_count=1,
+                    task_id="motion",
+                    repair_context=repair,
+                )
+
+            self.assertEqual(image_urls, [])
+            self.assertEqual(bridge["policy"]["reference_image_count"], 0)
+            self.assertEqual(bridge["policy"]["policy_reason"], "vetra_repair:strengthen_edit")
+            self.assertIn("camera", h3_prompt.lower())
+            self.assertEqual(editor.calls, [])
+
+    def test_camera_motion_passes_raw_requirement_without_qwen_rewrite(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent = root / "parent.mp4"
+            parent.write_bytes(b"test video placeholder")
+            stage_dir = root / "S2"
+            refiner = FakeRefiner()
+            editor = FakeEditor()
+            apimart = FakeCtmoai()
+            raw_prompt = "Move the camera slowly to the right."
+
+            with patch.object(pipeline, "select_keyframe", fake_select_keyframe):
+                image_urls, h3_prompt, bridge = pipeline.bridge_for_stage(
+                    refiner,
+                    editor,
+                    apimart,
+                    parent,
+                    stage_dir,
+                    raw_prompt,
+                    task_id="motion-raw",
+                )
+
+            self.assertEqual(image_urls, [])
+            self.assertEqual(h3_prompt, raw_prompt)
+            self.assertEqual(refiner.compositions, [])
+            self.assertEqual(bridge["final_refiner"]["h3_prompt_source"], "raw_camera_requirement")
+
     def test_static_three_anchor_override_does_not_change_global_initial_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -362,7 +528,10 @@ class H3MultiframeBridgeTests(unittest.TestCase):
         self.assertEqual(plan["style_reference_frame_index"], pipeline.PRIMARY_REFERENCE_FRAME_INDEX)
         self.assertEqual(plan["middle_frame_index"], pipeline.TEMPORAL_MIDDLE_FRAME_INDEX)
         self.assertEqual(plan["end_frame_index"], pipeline.TEMPORAL_END_FRAME_INDEX)
-        self.assertEqual(plan["middle_image_edit_prompt"], "Transform the entire video into a watercolor style.")
+        self.assertEqual(
+            plan["middle_image_edit_prompt"],
+            pipeline.image_edit_prompt("Transform the entire video into a watercolor style."),
+        )
         self.assertNotIn("start_image_edit_prompt", plan)
         with self.assertRaises(pipeline.ApimartError):
             pipeline.three_anchor_reference_plan(
@@ -372,7 +541,7 @@ class H3MultiframeBridgeTests(unittest.TestCase):
                 True,
             )
 
-    def test_legacy_middle_frame_roles_are_not_reused_from_bridge_cache(self) -> None:
+    def test_cached_bridge_does_not_reject_qwen_prompt_or_role_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             parent = root / "parent.mp4"
@@ -387,7 +556,6 @@ class H3MultiframeBridgeTests(unittest.TestCase):
                 _, _, bridge = pipeline.bridge_for_stage(
                     refiner, editor, apimart, parent, stage_dir, raw_prompt, 3, task_id="139",
                 )
-                self.assertTrue(pipeline.reference_roles_match_policy(bridge["reference_roles"], 3))
                 stale_bridge = pipeline.read_json(stage_dir / "bridge_for_next" / "bridge.json")
                 stale_bridge["reference_roles"][1]["source_frame_index"] = pipeline.OBSERVATION_FRAME_INDICES[-2]
                 pipeline.write_json(stage_dir / "bridge_for_next" / "bridge.json", stale_bridge)
@@ -395,13 +563,10 @@ class H3MultiframeBridgeTests(unittest.TestCase):
                     refiner, editor, apimart, parent, stage_dir, raw_prompt, 3, task_id="139",
                 )
 
-            self.assertFalse(
-                pipeline.reference_roles_match_policy(stale_bridge["reference_roles"], 3)
-            )
-            self.assertEqual(regenerated["reference_roles"], pipeline.expected_reference_roles(3))
-            self.assertEqual(len(editor.calls), 6)
+            self.assertEqual(regenerated["reference_roles"], stale_bridge["reference_roles"])
+            self.assertEqual(len(editor.calls), 3)
 
-    def test_video_only_stage_still_uses_five_frames_for_qwen_prompt(self) -> None:
+    def test_video_only_camera_stage_keeps_five_context_frames_for_bridge(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             parent = root / "parent.mp4"
@@ -424,9 +589,30 @@ class H3MultiframeBridgeTests(unittest.TestCase):
             self.assertEqual(image_urls, [])
             self.assertEqual(editor.calls, [])
             self.assertEqual(refiner.plan_calls, 0)
-            self.assertEqual(refiner.compositions, [[]])
+            self.assertEqual(refiner.compositions, [])
+            self.assertEqual(h3_prompt, "Add a gentle camera pull-back.")
+            self.assertEqual(bridge["final_refiner"]["h3_prompt_source"], "raw_camera_requirement")
             self.assertEqual(bridge["context_frame_indices"], [0, 26, 53, 80, 106])
-            self.assertIn("<Video 1>", h3_prompt)
+            self.assertNotIn("<Video 1>", h3_prompt)
+            self.assertNotIn("<Picture", h3_prompt)
+
+    def test_pure_action_stage_does_not_create_a_static_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent = root / "parent.mp4"
+            parent.write_bytes(b"test video placeholder")
+            refiner = FakeRefiner()
+            editor = FakeEditor()
+            apimart = FakeCtmoai()
+            raw_prompt = "Change the girl's action to a high vertical jump with arms outstretched."
+            with patch.object(pipeline, "select_keyframe", fake_select_keyframe):
+                image_urls, h3_prompt, bridge = pipeline.bridge_for_stage(
+                    refiner, editor, apimart, parent, root / "S1", raw_prompt, 1, task_id="10",
+                )
+            self.assertEqual(image_urls, [])
+            self.assertEqual(editor.calls, [])
+            self.assertEqual(bridge["policy"]["reference_image_count"], 0)
+            self.assertEqual(bridge["policy"]["policy_reason"], "pure_temporal_action_or_pose_change")
             self.assertNotIn("<Picture", h3_prompt)
 
     def test_targeted_repair_reuses_primary_reference_without_qwen_recompose(self) -> None:

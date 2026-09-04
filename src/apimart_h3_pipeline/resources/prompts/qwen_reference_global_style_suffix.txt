@@ -1,1 +1,1 @@
-This is a global style edit, but image_edit_prompt must still be the raw requirement verbatim; do not add style descriptors or preservation clauses.
+This is a global style edit. Keep image_edit_prompt limited to the raw requirement plus the shared instruction to preserve all other elements exactly as they are; do not add style descriptors or unrelated edits.

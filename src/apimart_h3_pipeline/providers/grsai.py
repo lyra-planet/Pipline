@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import time
 import urllib.error
@@ -17,6 +18,52 @@ from .apimart import ApimartError, read_env_file, write_json
 
 from ..core.policy import no_proxy_opener
 from ..media import read_json
+
+
+# GRSAI accepts a fixed set of aspect-ratio presets. Select the closest preset
+# from the actual input image instead of asking the service to infer a ratio
+# from the edited content.
+SUPPORTED_ASPECT_RATIOS = (
+    ("1:1", 1.0),
+    ("2:3", 2 / 3),
+    ("3:2", 3 / 2),
+    ("3:4", 3 / 4),
+    ("4:3", 4 / 3),
+    ("9:16", 9 / 16),
+    ("16:9", 16 / 9),
+)
+GRSAI_CAPACITY_RETRY_SECONDS = 60
+GRSAI_IMAGE_MODEL = "nano-banana-2"
+GPT_IMAGE_MODEL = "gpt-image-2"
+
+
+def image_model_for_stage(stage_id: str) -> str:
+    """Return the static-reference model assigned to a sequential stage."""
+
+    return GRSAI_IMAGE_MODEL if stage_id.strip().upper() == "S1" else GPT_IMAGE_MODEL
+
+
+def is_capacity_overload_error(error: BaseException) -> bool:
+    """Return whether GRSAI reported a transient capacity rejection."""
+
+    return "excessive system load" in str(error).casefold()
+
+
+def aspect_ratio_for_image(image: Path) -> str:
+    """Return the closest GRSAI-supported ratio for an input image."""
+
+    try:
+        with Image.open(image) as opened:
+            width, height = opened.size
+    except (OSError, ValueError) as error:
+        raise ApimartError(f"cannot inspect image dimensions: {image}") from error
+    if width <= 0 or height <= 0:
+        raise ApimartError(f"image has invalid dimensions: {image}")
+    ratio = width / height
+    return min(
+        SUPPORTED_ASPECT_RATIOS,
+        key=lambda item: abs(math.log(ratio / item[1])),
+    )[0]
 
 def find_url(value: Any) -> str | None:
     if isinstance(value, Mapping):
@@ -57,6 +104,7 @@ class GrsaiImageEditor:
         if not self.api_key:
             raise ApimartError(f"GRSAI_API_KEY is absent from {env_file}")
         self.timeout_seconds = timeout_seconds
+        self.model = GRSAI_IMAGE_MODEL
         self.opener = no_proxy_opener()
 
     def request(self, method: str, url: str, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -118,7 +166,55 @@ class GrsaiImageEditor:
         output: Path,
         state_path: Path,
         style_reference: Path | None = None,
+        aspect_ratio: str | None = None,
     ) -> dict[str, Any]:
+        """Run an image edit, waiting through transient provider overloads."""
+
+        while True:
+            try:
+                return self._edit_once(
+                    image,
+                    raw_prompt,
+                    image_edit_prompt,
+                    output,
+                    state_path,
+                    style_reference=style_reference,
+                    aspect_ratio=aspect_ratio,
+                )
+            except ApimartError as error:
+                if not is_capacity_overload_error(error):
+                    raise
+                waiting_state = read_json(state_path) if state_path.is_file() else {}
+                waiting_state.update({
+                    "status": "waiting_for_capacity",
+                    "model": getattr(self, "model", GRSAI_IMAGE_MODEL),
+                    "raw_prompt": raw_prompt,
+                    "image_edit_prompt": image_edit_prompt,
+                    "style_reference": str(style_reference) if style_reference else None,
+                    "aspect_ratio": aspect_ratio or aspect_ratio_for_image(image),
+                    "last_error": str(error),
+                    "retry_after_seconds": GRSAI_CAPACITY_RETRY_SECONDS,
+                })
+                write_json(state_path, waiting_state)
+                print(json.dumps({
+                    "event": "grsai_capacity_wait",
+                    "retry_after_seconds": GRSAI_CAPACITY_RETRY_SECONDS,
+                    "error": str(error),
+                }, ensure_ascii=False), flush=True)
+                time.sleep(GRSAI_CAPACITY_RETRY_SECONDS)
+
+    def _edit_once(
+        self,
+        image: Path,
+        raw_prompt: str,
+        image_edit_prompt: str,
+        output: Path,
+        state_path: Path,
+        style_reference: Path | None = None,
+        aspect_ratio: str | None = None,
+    ) -> dict[str, Any]:
+        aspect_ratio = aspect_ratio or aspect_ratio_for_image(image)
+        model = getattr(self, "model", GRSAI_IMAGE_MODEL)
         persisted: dict[str, Any] = {}
         if state_path.is_file() and output.is_file() and output.stat().st_size:
             state = read_json(state_path)
@@ -127,6 +223,8 @@ class GrsaiImageEditor:
                 and state.get("raw_prompt") == raw_prompt
                 and state.get("image_edit_prompt") == image_edit_prompt
                 and state.get("style_reference") == (str(style_reference) if style_reference else None)
+                and state.get("aspect_ratio") == aspect_ratio
+                and state.get("model", GRSAI_IMAGE_MODEL) == model
             ):
                 return state
         if state_path.is_file():
@@ -135,6 +233,8 @@ class GrsaiImageEditor:
                 candidate.get("raw_prompt") == raw_prompt
                 and candidate.get("image_edit_prompt") == image_edit_prompt
                 and candidate.get("style_reference") == (str(style_reference) if style_reference else None)
+                and candidate.get("aspect_ratio") == aspect_ratio
+                and candidate.get("model", GRSAI_IMAGE_MODEL) == model
                 and isinstance(candidate.get("task_id"), str)
                 and candidate.get("status") in {"submitted", "queued", "processing", "running"}
             ):
@@ -153,16 +253,18 @@ class GrsaiImageEditor:
                 image_inputs.append("data:image/png;base64," + base64.b64encode(style_reference.read_bytes()).decode("ascii"))
             response = self.request(
                 "POST", f"{self.base_url}/v1/api/generate",
-                {"model": "gpt-image-2", "prompt": image_edit_prompt, "images": image_inputs, "aspectRatio": "16:9", "replyType": "async"},
+                {"model": model, "prompt": image_edit_prompt, "images": image_inputs, "aspectRatio": aspect_ratio, "replyType": "async"},
             )
             initial_status = self.response_status(response)
             if initial_status in {"failed", "error", "cancelled", "canceled", "rejected", "expired"}:
                 detail = self.response_error(response)
                 failed_state = {
                     "status": "failed",
+                    "model": model,
                     "raw_prompt": raw_prompt,
                     "image_edit_prompt": image_edit_prompt,
                     "style_reference": str(style_reference) if style_reference else None,
+                    "aspect_ratio": aspect_ratio,
                     "error": detail or initial_status,
                 }
                 write_json(state_path, failed_state)
@@ -176,9 +278,11 @@ class GrsaiImageEditor:
             if task_id:
                 write_json(state_path, {
                     "status": initial_status or "submitted",
+                    "model": model,
                     "raw_prompt": raw_prompt,
                     "image_edit_prompt": image_edit_prompt,
                     "style_reference": str(style_reference) if style_reference else None,
+                    "aspect_ratio": aspect_ratio,
                     "task_id": task_id,
                     "polls": polls,
                 })
@@ -192,10 +296,13 @@ class GrsaiImageEditor:
                 detail = self.response_error(result)
                 write_json(state_path, {
                     "status": "failed",
+                    "model": model,
                     "raw_prompt": raw_prompt,
                     "image_edit_prompt": image_edit_prompt,
+                    "style_reference": str(style_reference) if style_reference else None,
                     "task_id": task_id,
                     "polls": polls,
+                    "aspect_ratio": aspect_ratio,
                     "error": detail or status,
                 })
                 raise ApimartError(
@@ -204,9 +311,11 @@ class GrsaiImageEditor:
                 )
             write_json(state_path, {
                 "status": status or "processing",
+                "model": model,
                 "raw_prompt": raw_prompt,
                 "image_edit_prompt": image_edit_prompt,
                 "style_reference": str(style_reference) if style_reference else None,
+                "aspect_ratio": aspect_ratio,
                 "task_id": task_id,
                 "polls": polls,
             })
@@ -214,10 +323,12 @@ class GrsaiImageEditor:
         if not url:
             write_json(state_path, {
                 "status": "timeout",
+                "model": model,
                 "raw_prompt": raw_prompt,
                 "image_edit_prompt": image_edit_prompt,
                 "task_id": task_id,
                 "polls": polls,
+                "aspect_ratio": aspect_ratio,
             })
             raise ApimartError(f"GRSAI image task produced no URL: task_id={task_id}")
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -230,9 +341,11 @@ class GrsaiImageEditor:
             image_value.convert("RGB").save(output, "PNG")
         state = {
             "status": "succeeded",
+            "model": model,
             "raw_prompt": raw_prompt,
             "image_edit_prompt": image_edit_prompt,
             "style_reference": str(style_reference) if style_reference else None,
+            "aspect_ratio": aspect_ratio,
             "task_id": task_id,
             "polls": polls,
             "output": str(output),

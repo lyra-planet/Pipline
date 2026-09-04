@@ -51,7 +51,7 @@ flowchart TD
     KF --> QWEN
     QWEN --> HP[简洁 H3 prompt]
     QWEN --> IP[可选 image_edit_prompt]
-    IP --> IMG[图像 Diffusion / gpt-image-2<br/>只修改静态目标]
+    IP --> IMG[图像编辑 API / S1: nano-banana-2; 其他 stage: gpt-image-2<br/>只修改静态目标]
     IMG --> PIC[内容对齐参考图<br/><Picture 1> 或三张 anchor]
 
     PREV --> H3[MiniMax-H3 Ref2VA<br/>视频负责运动和时序]
@@ -335,7 +335,8 @@ Qwen-VL 只能在这个输入契约内改写
 | 类型 | 典型关键词/意图 | 图像参考 | 输入给 H3 |
 | --- | --- | ---: | --- |
 | 静态外观 | style、oil painting、sepia、wet、reflective、lighting、material、color | 是 | `<Video 1>` + `<Picture 1>` |
-| 内容/对象 | add、remove、replace object、change action、reposition object | 是 | `<Video 1>` + `<Picture 1>` |
+| 纯动作/姿态 | change action、pose、jump、run、walk、sit、stand 等，且没有对象/外观目标 | 否 | 仅 `<Video 1>`，要求自然起始和时间展开 |
+| 内容/对象或混合动作 | add、remove、replace object，或动作同时涉及报纸、白板文字、持物等静态内容 | 是 | `<Video 1>` + `<Picture 1>` |
 | 构图 | object moved higher/left/center、background/layout change | 是 | `<Video 1>` + `<Picture 1>` |
 | 相机/运动 | pan、push-in、zoom、dolly、tracking、sway、motion blur | 否 | 仅 `<Video 1>` |
 | 时间/音频 | speed、temporal、fps、sound、music、voice | 否 | 仅 `<Video 1>` |
@@ -461,7 +462,7 @@ task_139_S1_keyframe_000.png（正常路径；首帧 style master，文件名必
         ↓ 全局风格失败或 style_inconsistency retry 时
 task_139_S1_keyframe_000.png + task_139_S1_keyframe_053.png + task_139_S1_keyframe_106.png（升级路径）
         ↓ Qwen-VL image_edit_prompt
-图像模型（当前实现 gpt-image-2 API）
+图像模型（S1 使用 nano-banana-2；S1 之外的 stage 使用 gpt-image-2）
         ↓
 task_139_S1_reference_image_1.png（内容与关键帧对齐）
         ↓ 上传到 H3 API / 放入 ComfyUI LoadImage
@@ -606,7 +607,7 @@ Qwen-VL post-edit observer(context frames, S_i.raw_prompt)
 再次五帧语义观察；失败则写入 semantic_failure 并停止传播
 ```
 
-`post-edit observer` 是每一次 H3 输出都要经过的语义成功门，而不是可选的最终展示步骤。第一次输出失败后，普通编辑按 failure type 定向修复；全局风格失败直接进入三锚点 retry。retry 输出仍需通过 semantic gate；若最终失败，记录 `semantic_failure`，不把未确认文件传给下一阶段。
+`post-edit observer` 负责首轮 H3 输出的语义成功门。第一次输出失败后，普通编辑按 failure type 定向修复；全局风格失败直接进入三锚点 retry。retry 输出只做媒体合法性检查，不再调用 Observer；它被记录为 `semantic_failure_propagated`，并作为降级 parent 传给下一阶段，sequence 状态为 `degraded`。这样不会把 retry 伪装成语义成功，同时也不会因 retry 的二次 Observer 失败而中断整条 pipeline。
 
 对于 camera、temporal 或 audio 这类 `video-only` stage，`motion_weak` repair 保持 video-only，只强化 raw requirement 中已有的 motion 语义；不会为了静态锚点调用图像模型。三锚点只服务于外观时序约束，不能让图像模型擅自改变运动语义。
 
@@ -651,14 +652,14 @@ stateDiagram-v2
     PostEditObserver --> DecideStage: edit success and more stages
     PostEditObserver --> Complete: edit success and final stage
     PostEditObserver --> ThreeAnchorRetry: edit not confirmed
-    ThreeAnchorRetry --> PostEditObserver: retry same stage
+    ThreeAnchorRetry --> PropagateDegraded: validate media; skip Observer
     Complete --> [*]
-    ThreeAnchorRetry --> PlanningFailure: retry still fails / backtrack required
+    PropagateDegraded --> DecideStage: next stage uses retry output as parent
     RetryOrFail --> MakeBridge: reusable bridge exists
     RetryOrFail --> PlanningFailure: unrecoverable
 ```
 
-注意：`PlanningFailure`、`H3 failed`、`download failed`、`semantic requirement not satisfied` 是不同的失败。只有第一类是计划校验失败；其余需要在执行/视觉评估层单独记录，不能用“文件存在”冒充成功。`PostEditObserver` 未确认时，状态机必须停在当前 stage，先按 `failure_type` 走定向 repair；全局风格失败或 `style_inconsistency` 才走 `ThreeAnchorRetry`，也不能直接进入下一 stage。
+注意：`PlanningFailure`、`H3 failed`、`download failed`、`semantic requirement not satisfied` 是不同的失败。只有第一类是计划校验失败；其余需要在执行/视觉评估层单独记录，不能用“文件存在”冒充成功。`PostEditObserver` 首轮未确认时，状态机先按 `failure_type` 走定向 repair；全局风格失败或 `style_inconsistency` 才走 `ThreeAnchorRetry`。一旦已发起 retry，retry 输出只做媒体合法性检查并作为标记为 `semantic_failure_propagated` 的降级 parent 进入下一 stage，不再调用第二次 Observer。
 
 ---
 

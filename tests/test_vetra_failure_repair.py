@@ -440,6 +440,7 @@ class VetraRunnerStateMachineTests(unittest.TestCase):
         observations: list[dict[str, object]],
         recovery: str = "targeted",
         prompt: str = "Move the red newspaper to the center of the table.",
+        stages: list[dict[str, str]] | None = None,
     ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -449,7 +450,7 @@ class VetraRunnerStateMachineTests(unittest.TestCase):
             task = {
                 "task_id": "t1",
                 "source_video": source,
-                "stages": [{"stage_id": "S1", "prompt": prompt}],
+                "stages": stages or [{"stage_id": "S1", "prompt": prompt}],
             }
             geometry = runner.CanvasGeometry(1920, 1080, 1344, 756, 0, 6)
             bridge_calls: list[dict[str, object] | None] = []
@@ -523,10 +524,10 @@ class VetraRunnerStateMachineTests(unittest.TestCase):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
             return result, error, bridge_calls, h3_calls, manifest
 
-    def test_targeted_repair_retries_same_stage_and_keeps_one_anchor(self) -> None:
+    def test_targeted_retry_is_propagated_without_a_second_observer(self) -> None:
         result, error, bridge_calls, h3_calls, manifest = self._run_mocked_main([
             {"success": False, "failure_type": "edit_missing", "observation": "edit absent", "confidence": 0.95},
-            {"success": True, "failure_type": "none", "observation": "confirmed", "confidence": 0.95},
+            {"success": True, "failure_type": "none", "observation": "unused", "confidence": 0.95},
         ])
         self.assertIsNone(error)
         self.assertEqual(result, 0)
@@ -534,18 +535,20 @@ class VetraRunnerStateMachineTests(unittest.TestCase):
         self.assertIsNone(bridge_calls[0])
         self.assertEqual(bridge_calls[1]["repair_action"], "strengthen_edit")
         self.assertEqual(bridge_calls[1]["reference_policy"], "one_anchor")
-        self.assertEqual(manifest["stages"][0]["status"], "success")
+        self.assertEqual(manifest["stages"][0]["status"], "semantic_failure_propagated")
+        self.assertEqual(manifest["status"], "degraded")
         self.assertEqual(len(manifest["stages"][0]["attempts"]), 2)
         self.assertEqual(manifest["stages"][0]["attempts"][0]["diagnosis"]["failure_type"], "edit_missing")
+        self.assertTrue(manifest["stages"][0]["attempts"][1]["observer_skipped"])
 
-    def test_single_retry_reuses_the_stage_parent_video_and_then_stops(self) -> None:
+    def test_single_retry_reuses_stage_parent_and_does_not_stop_sequence(self) -> None:
         result, error, bridge_calls, h3_calls, manifest = self._run_mocked_main([
             {"success": False, "failure_type": "edit_missing", "observation": "edit absent", "confidence": 0.95},
             {"success": False, "failure_type": "edit_missing", "observation": "still absent", "confidence": 0.95},
             {"success": True, "failure_type": "none", "observation": "confirmed", "confidence": 0.95},
         ])
-        self.assertIsNone(result)
-        self.assertIsInstance(error, runner.ApimartError)
+        self.assertEqual(result, 0)
+        self.assertIsNone(error)
         self.assertEqual(len(h3_calls), 2)
         self.assertEqual(
             [call["video_url"] for call in h3_calls],
@@ -555,19 +558,41 @@ class VetraRunnerStateMachineTests(unittest.TestCase):
             [attempt["h3_input_video_url"] for attempt in manifest["stages"][0]["attempts"]],
             ["https://media.invalid/task_t1_initial.mp4"] * 2,
         )
-        self.assertEqual(manifest["status"], "semantic_failure")
+        self.assertEqual(manifest["status"], "degraded")
+        self.assertEqual(manifest["stages"][0]["status"], "semantic_failure_propagated")
 
-    def test_second_semantic_failure_stops_without_propagation(self) -> None:
+    def test_retry_output_is_propagated_even_when_retry_would_have_failed(self) -> None:
         result, error, bridge_calls, h3_calls, manifest = self._run_mocked_main([
             {"success": False, "failure_type": "identity_drift", "observation": "face changed", "confidence": 0.95},
             {"success": False, "failure_type": "identity_drift", "observation": "face still changed", "confidence": 0.95},
         ])
-        self.assertIsNone(result)
-        self.assertIsInstance(error, runner.ApimartError)
+        self.assertEqual(result, 0)
+        self.assertIsNone(error)
         self.assertEqual(len(h3_calls), 2)
-        self.assertEqual(manifest["status"], "semantic_failure")
-        self.assertEqual(manifest["stages"][0]["status"], "semantic_failure")
+        self.assertEqual(manifest["status"], "degraded")
+        self.assertEqual(manifest["stages"][0]["status"], "semantic_failure_propagated")
         self.assertEqual(manifest["stages"][0]["diagnosis"]["failure_type"], "identity_drift")
+        self.assertTrue(manifest["stages"][0]["observer_skipped"])
+
+    def test_retry_output_becomes_next_stage_parent(self) -> None:
+        result, error, _bridge_calls, h3_calls, manifest = self._run_mocked_main(
+            [
+                {"success": False, "failure_type": "edit_missing", "observation": "absent", "confidence": 0.95},
+                {"success": True, "failure_type": "none", "observation": "stage two unused", "confidence": 0.95},
+            ],
+            stages=[
+                {"stage_id": "S1", "prompt": "Move the red newspaper to the center of the table."},
+                {"stage_id": "S2", "prompt": "Add a blue cup beside the newspaper."},
+            ],
+        )
+        self.assertEqual(result, 0)
+        self.assertIsNone(error)
+        self.assertEqual(len(h3_calls), 3)
+        self.assertEqual(h3_calls[0]["video_url"], "https://media.invalid/task_t1_initial.mp4")
+        self.assertEqual(h3_calls[1]["video_url"], "https://media.invalid/task_t1_initial.mp4")
+        self.assertEqual(h3_calls[2]["video_url"], "https://media.invalid/task_t1_S1.mp4")
+        self.assertEqual(manifest["stages"][0]["status"], "semantic_failure_propagated")
+        self.assertEqual(manifest["stages"][1]["status"], "success")
 
     def test_observer_unavailable_stops_without_propagation(self) -> None:
         result, error, bridge_calls, h3_calls, manifest = self._run_mocked_main([

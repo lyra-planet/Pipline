@@ -35,10 +35,20 @@ does not depend on the node IDs from one particular ComfyUI export.
 
 The package deliberately keeps the control-plane boundary explicit.  A stage
 is executed against one immutable parent video.  A failed output is observed
-and archived, but is never fed into its own retry.  A normal static/global edit
-starts with the first parent frame as the style master.  Only a failed global
-style attempt is escalated to frame `0/53/106` anchors, with the first-frame
-master passed as the style reference for the middle and end image edits.
+and archived, but is never fed into its own retry.  The first generation is
+`attempt_1`; the bounded repair generation is `attempt_2`.  Once that retry is
+submitted, its media is validated and propagated to the next stage without a
+second Observer call.  The stage and sequence manifest mark this as
+`semantic_failure_propagated`/`degraded`, so downstream processing can continue
+without presenting the retry as semantically confirmed.  A normal static/global
+edit starts with the first parent frame as the style master.  Only a failed
+global style attempt is escalated to frame `0/53/106` anchors, with the
+first-frame master passed as the style reference for the middle and end image
+edits.
+Pure action or pose changes are the other explicit path: they use only
+`<Video 1>` and a temporal-onset contract, so a target pose is not baked into
+the first frame as a static picture.  Action edits that also change or expose a
+static object, text, appearance, or composition remain image-conditioned.
 
 ## Install on another machine
 

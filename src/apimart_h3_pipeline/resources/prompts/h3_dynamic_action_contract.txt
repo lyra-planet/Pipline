@@ -1,0 +1,1 @@
+Treat this as a temporal action edit. Animate only the requested action change with a natural onset and progression. Do not place the target pose in the first frame or hold one target pose throughout the clip unless the requirement explicitly asks for that.

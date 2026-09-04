@@ -56,7 +56,7 @@ compiled-jobs
     |       +--> 无参考图：Qwen 观察，H3 使用原始 prompt + <Video 1>
     |       |
     |       +--> 一张图：固定使用上下文首帧 0
-    |       |       -> gpt-image-2 编辑首帧 style master
+    |       |       -> nano-banana-2 编辑首帧 style master
     |       |       -> Qwen 生成带 Picture/Video 标签的 H3 prompt
     |       |
     |       +--> 全局风格/普通静态编辑：默认编辑一张 primary anchor
@@ -78,7 +78,9 @@ Qwen-VL 五帧成功门 + failure_type 诊断
             |       保持原参考数量，强化对应约束
             +--> motion_weak：video_only，强化原 motion 语义
             +--> style_inconsistency：start/primary/end 三锚点
-            +--> 不可修复或达到预算：semantic_failure，停止传播
+            +--> 不可修复：semantic_failure，停止传播
+            +--> 已发起 retry：只做媒体合法性检查，不再调用 Observer；
+                    输出标记 semantic_failure_propagated，物化后传给下一 stage
     |
     v
 归一化 stage 输出，作为下一轮 parent video
@@ -134,7 +136,7 @@ S3 = S2 归一化后的输出
 
 每个 stage 都从当前 parent video 抽取 0、26、53、80、106 五帧。这五帧用于 Qwen 内容观察、编写 H3 prompt 和检查输出；参考图主帧固定取首帧 0。
 
-同一个 stage 的 retry 使用进入该 stage 时锁定的 `stage_parent_video` 和 `stage_parent_url`。失败的 H3 输出只会被 Observer 读取、写入 `attempts/attempt_N/` 并作为诊断证据，绝不会回写 `parent`，也不会成为下一次 H3 请求或参考帧抽取的输入。每次 attempt 还记录 `h3_input_video` 与 `h3_input_video_url`，因此可以直接审计 retry 是否仍指向原始 parent。对于 CTMOAI 恢复的持久化请求，如果其视频 URL 与锁定 parent 不一致，runner 会中止而不是继续提交。
+同一个 stage 的 retry 使用进入该 stage 时锁定的 `stage_parent_video` 和 `stage_parent_url`。首轮失败的 H3 输出会被 Observer 读取并写入 `attempts/attempt_1/`，绝不会成为自己的 retry 输入。唯一 retry（`attempt_2`）仍使用原始 parent；retry 生成后不再调用 Observer，而是验证媒体、物化为该 stage 的标准输出并作为下一 stage parent。每次 attempt 还记录 `h3_input_video` 与 `h3_input_video_url`，因此可以直接审计 retry 是否仍指向原始 parent。对于 CTMOAI 恢复的持久化请求，如果其视频 URL 与锁定 parent 不一致，runner 会中止而不是继续提交。
 
 ## 7. 参考图策略
 
@@ -143,12 +145,12 @@ reference_policy() 是本地正则启发式，不是 Qwen 分类器。它会先�
 优先级如下：
 
 ~~~text
-全局风格 -> 静态视觉 -> 时序/音频 -> 普通对象编辑 -> 默认使用参考图
+全局风格 -> 纯动作/姿态 -> 静态视觉 -> 时序/音频 -> 普通对象编辑 -> 默认使用参考图
 ~~~
 
 全局风格关键词包括 style、appearance、look、watercolor、oil painting、anime、vintage、sepia、monochrome 等。静态视觉关键词包括 recolor、lighting、rain、wet、reflective、background、face、hair、material、add、remove、replace、reposition 等。
 
-camera、pan、push-in、pull-out、zoom、dolly、tilt、orbit、tracking、motion、movement、speed、sway、blur、temporal、fps、audio、sound、music、voice、wind 等通常判为不需要参考图。
+明确的纯动作/姿态变化（例如 action、pose、jump、run、walk、sit、stand、flap 等）也不生成静态图片参考，而是只把原始视频交给 H3，并附加动作的自然起始和时间展开约束。若动作同时涉及对象替换、报纸/白板文字、持物/阅读等静态内容，则回到内容参考图路径。camera、pan、push-in、pull-out、zoom、dolly、tilt、orbit、tracking、motion、movement、speed、sway、blur、temporal、fps、audio、sound、music、voice、wind 等通常判为不需要参考图。
 
 如果一个 prompt 同时包含静态视觉词和 motion/camera 词，静态视觉分支先匹配，因此可能仍会使用参考图。这是当前实现的实际行为，需要在编译计划阶段避免含义混杂的 stage prompt。
 
@@ -158,22 +160,26 @@ camera、pan、push-in、pull-out、zoom、dolly、tilt、orbit、tracking、mot
 
 需要参考图时，Qwen 仍接收原始 atomic prompt 和 parent video 的五帧，用于内容观察和审计；参考帧不再由 Qwen 自由选择，普通路径固定使用上下文首帧 `frame 0` 作为 primary style master。只有进入三锚点 retry/显式三图实验时，才额外编辑中间帧 `frame 53` 和末帧 `frame 106`；这两次图片编辑都把首帧生成的 primary style master 作为 `style_reference`。Qwen 返回观察和固定帧契约的元数据。
 
-图片编辑服务是 GRSAI 的 gpt-image-2：
+S1 只要需要图片编辑，使用一张已经按 H3 画布处理的带黑边参考帧，调用 GRSAI `nano-banana-2` 做一次 atomic image edit；不在图片编辑阶段裁剪、回填或再次扩展画布。三锚点 S1 的首帧、中间帧和末帧分别使用各自的带黑边 H3 参考帧编辑，中间帧和末帧额外接收首帧作为风格参考。S1 之外的 stage 使用 `gpt-image-2`，仍保持每个普通 stage 一轮图片编辑。
+
+图片编辑服务是 GRSAI；模型按 stage 选择：
 
 ~~~text
 POST <GRSAI_BASE_URL>/v1/api/generate
-model       = gpt-image-2
+model       = nano-banana-2  # S1
+model       = gpt-image-2    # S1 之外的 stage
 replyType   = async
-aspectRatio = 16:9
+aspectRatio = closest supported ratio of the actual edit input
 ~~~
 
-图片编辑 prompt 始终被代码强制设为原始 atomic prompt：
+图片编辑 prompt 始终由代码从原始 atomic prompt 构造，只增加一个不改变语义的保持约束：
 
 ~~~text
-image_edit_prompt = next_raw_prompt.strip()
+image_edit_prompt = image_edit_prompt(next_raw_prompt)
+# 结果示例：<原始 requirement> Preserve all other elements exactly as they are.
 ~~~
 
-因此 Qwen 不会把观察到的对象、材质、颜色或场景细节自行添加到图片编辑指令。图片任务提交后每 5 秒查询，下载 PNG，并保存独立的 image_edit_state 文件。
+因此 Qwen 不会把观察到的对象、材质、颜色或场景细节自行添加到图片编辑指令；图片模型只执行原始编辑，并明确保持其他元素不变。该约束通过 `resources/prompts/image_edit_preservation.txt` 外置，恢复时会按请求字段匹配，不会重复提交已经完成的图片任务。图片任务提交后每 5 秒查询，下载 PNG，并保存独立的 image_edit_state 文件。如果 GRSAI 明确返回 `excessive system load`，provider 会把状态标为 `waiting_for_capacity`，等待 60 秒后用同一输入重新提交，直到成功；其他失败仍立即停止。
 
 ## 9. Qwen 生成最终 H3 prompt
 
@@ -206,6 +212,8 @@ Picture 1 负责外观和静态变化；Video 1 负责原视频动作、运动�
 ~~~text
 Apply only this edit to <Video 1>: <原始 atomic prompt>
 ~~~
+
+第一次 H3 推理前，只有 atomic requirement 明确表达镜头运动时才会注入简短 camera 澄清：左右移动按请求方向做平滑水平 pan 并保持同一主体焦点，push-in/pull-out 按实体相机前后运动，zoom 按镜头 framing，其他已命名运动保持其原类型。每种澄清句存放在 `resources/prompts/h3_camera_motion_clauses.json`，公共约束存放在 `h3_camera_motion_contract.txt`。Qwen 生成 H3 prompt 时必须先写当前操作，再补充必要的 `<Picture>/<Video>` 关系；不添加对象、动作、风格或新的 requirement，也不让图片模型参与 camera motion。
 
 ## 10. H3 生成后端
 
@@ -263,9 +271,9 @@ policy["is_global_style"] and first_attempt_used_one_anchor
 3. 用 parent 原始上下文末帧编辑 Picture 3 end anchor，并把 Picture 1 作为 `style_reference`；
 4. 组成首帧/中帧/末帧三锚点；
 5. 重新生成 H3 prompt，提交同一 stage；
-6. 再做一次五帧成功门。
+6. retry 输出只做媒体合法性检查，不再调用 Observer；物化后作为下一 stage parent。
 
-定向或三锚点 retry 只允许执行一次；该预算是 runner 的固定协议，不提供 CLI 覆盖。第一次 retry 仍失败后写入 `semantic_failure` 并停止当前任务，不进入下一 stage。
+定向或三锚点 retry 只允许执行一次；该预算是 runner 的固定协议，不提供 CLI 覆盖。首轮失败归档为 `attempt_1`，retry 为 `attempt_2`。retry 输出不再进行第二次 Observer 评估，而是记录为 `semantic_failure_propagated`，物化为当前 stage 的标准输出并作为下一 stage parent；sequence 最终状态为 `degraded`。不可修复、Observer 不可用或媒体无效且没有可传播 retry 时仍停止。
 
 ## 12. Stage 输出归一化和最终输出
 
@@ -308,7 +316,7 @@ crop=<content_width>:<content_height>:<offset_x>:<offset_y>
 ~~~text
 APIMART_API_KEY / CTMOAI_API_KEY：视频生成
 DASHSCOPE_API_KEY：Qwen-VL
-GRSAI_API_KEY：gpt-image-2
+GRSAI_API_KEY：nano-banana-2
 
 ~/.apimart.env（也可通过 `APIMART_ENV_FILE` 指定）
 ~/.grsai.env（也可通过 `GRSAI_ENV_FILE` 指定）
@@ -327,7 +335,7 @@ python scripts/run_apimart_minimax_h3_sequential.py --compiled-jobs /path/to/com
 
 1. stage 顺序完全来自输入计划，runner 不自动把风格编辑移到最后。
 2. 是否需要参考图由本地 reference_policy() 判断，不是 Qwen 判断。
-3. Qwen 观察五帧，但不再自由选择主帧；图片编辑固定使用首帧 0，且 prompt 始终是原始 atomic prompt。
+3. Qwen 观察五帧，但不再自由选择主帧；图片编辑固定使用首帧 0，且 prompt 始终是原始 atomic prompt。S1 图片编辑使用一张带黑边 H3 画布帧做一次 edit。
 4. 无参考图时 Qwen 仍观察五帧，但 H3 使用原始 prompt 加 Video 绑定。
 5. 全局风格首次使用一张 primary reference，失败后直接升级三锚点；普通编辑默认按 failure type 定向修复，只有 `style_inconsistency` 或显式基线才在失败后升级三锚点。
 6. 下一轮输入是上一轮归一化后的输出，不是永远重新使用源视频。

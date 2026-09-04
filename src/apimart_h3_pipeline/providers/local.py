@@ -206,6 +206,26 @@ class LocalH3Client:
         return names
 
     @staticmethod
+    def _scoped_token(stage_dir: Path, stage_id: str) -> str:
+        """Build a stable ComfyUI filename scope from the run directory.
+
+        ComfyUI resolves ``LoadVideo`` and ``LoadImage`` names when a queued
+        prompt executes.  The batch runner can therefore have an older prompt
+        waiting while the next task prepares its inputs.  Including the
+        existing task directory in the filenames keeps queued prompts
+        independent without adding state to the pipeline manifest.
+        """
+
+        resolved = stage_dir.resolve()
+        task_scope = resolved.parent.parent.name if resolved.parent.name == "stages" else resolved.parent.name
+
+        def safe(value: str) -> str:
+            cleaned = "".join(character if character.isalnum() or character in "-_." else "_" for character in value)
+            return cleaned.strip("._") or "run"
+
+        return f"{safe(task_scope)}_{safe(stage_id or resolved.name)}"
+
+    @staticmethod
     def _history_output(history: Mapping[str, Any], output_dir: Path) -> Path:
         outputs = history.get("outputs")
         if not isinstance(outputs, Mapping):
@@ -255,7 +275,7 @@ class LocalH3Client:
         stage_dir: Path,
         stage_id: str,
     ) -> Path:
-        token = stage_id or "stage"
+        token = self._scoped_token(stage_dir, stage_id)
         input_name = self._materialize_input(source_video, token)
         reference_names = self._materialize_references(reference_images, token)
         graph = self.build_workflow(prompt, input_name, reference_names, token)

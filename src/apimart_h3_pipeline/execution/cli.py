@@ -78,6 +78,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--allow-resubmit", action="store_true", help="retry only a state already proven not to have created an API task")
     parser.add_argument("--last-stage", help="stop after this inclusive stage ID, for example S3")
     parser.add_argument(
+        "--start-stage",
+        help="start at this stage ID and reuse the preceding completed stage output, for example S2",
+    )
+    parser.add_argument(
         "--initial-reference", action="store_true",
         help="legacy compatibility flag; every stage now uses the same bridge contract",
     )

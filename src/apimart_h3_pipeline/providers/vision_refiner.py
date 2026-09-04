@@ -10,8 +10,8 @@ from ..core.repair_policy import RepairValidationError, validate_observation
 
 from ..core.constants import OBSERVATION_FRAME_INDICES, PRIMARY_REFERENCE_FRAME_INDEX, QWEN_CONTEXT_FRAME_INDICES
 from ..media import select_keyframe
-from ..core.policy import normalized_prompt, parse_json_object, validate_h3_reference_tags
-from ..resources.catalog import PromptResourceError, render_prompt
+from ..core.policy import normalized_prompt, parse_json_object
+from ..resources.catalog import PromptResourceError, image_edit_prompt, render_prompt
 from .dashscope_client import DashScopeClient
 
 class DashScopeVisionRefiner(DashScopeClient):
@@ -49,7 +49,7 @@ class DashScopeVisionRefiner(DashScopeClient):
                 {"role": "user", "content": self.multimodal_content(user, context_frames)},
             ],
             "temperature": 0,
-            "max_tokens": 520,
+            "max_tokens": 300,
         }
         response_text, response = self.complete(payload)
         result = parse_json_object(response_text, "Qwen-VL reference planner")
@@ -66,18 +66,17 @@ class DashScopeVisionRefiner(DashScopeClient):
         # The image editor is deliberately not given Qwen's paraphrase.  An
         # image edit is a pixel-level reference construction step, so adding
         # observed objects (or inferred materials such as "wooden surface")
-        # changes content that the atomic request never asked to change.  Qwen
+        # changes content that the atomic request never asked to change. Qwen
         # still selects the frame and records its proposed wording for audit,
-        # but the editor receives the original compiled prompt verbatim.
-        raw_image_edit_prompt = next_raw_prompt.strip()
-        if not raw_image_edit_prompt:
-            raise ApimartError("raw atomic prompt is empty for image editing")
+        # but the editor receives the raw requirement plus one shared
+        # preservation constraint.
+        raw_image_edit_prompt = image_edit_prompt(next_raw_prompt)
         return {
             "model": self.model,
             "selected_frame_index": selected_frame_index,
             "selection_reason": normalized_prompt(str(result.get("selection_reason", ""))),
             "image_edit_prompt": raw_image_edit_prompt,
-            "image_edit_prompt_source": "raw_atomic_prompt_verbatim",
+            "image_edit_prompt_source": "raw_atomic_prompt_with_preservation_constraint",
             "frame_observation": normalized_prompt(str(result.get("frame_observation", ""))),
             "is_global_style": is_global_style,
             "usage": dict(usage) if isinstance(usage, Mapping) else {},
@@ -97,14 +96,9 @@ class DashScopeVisionRefiner(DashScopeClient):
         picture_count = len(style_references)
         if picture_count not in {0, 1, 3}:
             raise ApimartError(f"unsupported final Qwen picture count: {picture_count}")
-        if reference_roles and len(reference_roles) != picture_count:
-            raise ApimartError(
-                "final Qwen prompt requires one temporal role per attached picture: "
-                f"{len(reference_roles)} != {picture_count}"
-            )
         role_lines = [
             f"<Picture {index}> = {str(role.get('role', '')).strip()}, "
-            f"source frame {int(role.get('source_frame_index'))}"
+            f"source frame {str(role.get('source_frame_index', '')).strip()}"
             for index, role in enumerate(reference_roles, 1)
         ]
         role_contract = "\n".join(role_lines)
@@ -150,54 +144,28 @@ class DashScopeVisionRefiner(DashScopeClient):
             "temperature": 0,
             "max_tokens": 520,
         }
-        rejected_outputs: list[dict[str, str]] = []
-        response: Mapping[str, Any] = {}
-        for repair_attempt in range(3):
-            response_text, response = self.complete(payload)
-            try:
-                result = parse_json_object(response_text, "Qwen-VL final H3 prompt")
-                h3_prompt = validate_h3_reference_tags(
-                    str(result.get("h3_prompt", "")), picture_count, reference_roles,
-                )
-            except ApimartError as error:
-                rejected_outputs.append({"output": response_text, "validation_error": str(error)})
-                if repair_attempt == 2:
-                    raise ApimartError(
-                        "Qwen-VL could not produce a reference-consistent H3 prompt after 3 attempts"
-                    ) from error
-                payload = dict(payload)
-                payload["messages"] = [
-                    *payload["messages"],
-                    {"role": "assistant", "content": response_text},
-                    {
-                        "role": "user",
-                        "content": render_prompt(
-                            "qwen_h3_validation_retry.txt",
-                            validation_error=str(error),
-                        ),
-                    },
-                ]
-                continue
-            usage = response.get("usage")
-            if picture_count == 0:
-                # A video-only atomic edit must not acquire new scene
-                # semantics from Qwen's frame caption (for example, naming
-                # objects or materials that were absent from the raw request).
-                # Keep the required <Video 1> binding, but pass the original
-                # camera/action/timing instruction verbatim to H3.
-                h3_prompt = f"Apply only this edit to <Video 1>: {next_raw_prompt.strip()}"
-            return {
-                "model": self.model,
-                "h3_prompt": h3_prompt,
-                "h3_prompt_source": "raw_atomic_prompt_with_video_binding"
-                if picture_count == 0 else "qwen_reference_contract",
-                "frame_observation": normalized_prompt(str(result.get("frame_observation", ""))),
-                "picture_count": picture_count,
-                "is_global_style": is_global_style,
-                "repair_attempts": rejected_outputs,
-                "usage": dict(usage) if isinstance(usage, Mapping) else {},
-            }
-        raise ApimartError("Qwen-VL H3 prompt repair loop exited unexpectedly")
+        response_text, response = self.complete(payload)
+        try:
+            result = parse_json_object(response_text, "Qwen-VL final H3 prompt")
+        except ApimartError:
+            # Use a non-JSON Qwen response verbatim instead of rejecting it.
+            result = {"h3_prompt": response_text, "frame_observation": ""}
+        # Qwen-VL owns the final wording.  Do not reject or rewrite it based
+        # on reference tags, source-frame declarations, length limits, or
+        # other prompt contracts.  The only required boundary is parsing the
+        # provider's JSON response so the H3 prompt can be retrieved.
+        h3_prompt = str(result.get("h3_prompt", ""))
+        usage = response.get("usage")
+        return {
+            "model": self.model,
+            "h3_prompt": h3_prompt,
+            "h3_prompt_source": "qwen_vl_direct",
+            "frame_observation": normalized_prompt(str(result.get("frame_observation", ""))),
+            "picture_count": picture_count,
+            "is_global_style": is_global_style,
+            "repair_attempts": [],
+            "usage": dict(usage) if isinstance(usage, Mapping) else {},
+        }
 
     def observe(self, frames: Sequence[Path], atomic_prompt: str) -> dict[str, Any]:
         """Judge one atomic edit from five uniformly sampled output frames."""

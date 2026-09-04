@@ -1,3 +1,0 @@
-The previous JSON was rejected by the deterministic validator with this error:
-${validation_error}
-Return a corrected JSON object only. Keep the raw atomic edit unchanged and do not add any new edit. The h3_prompt itself, not surrounding prose, must satisfy the exact <Video 1>, <Picture N>, and temporal source-frame anchor contract stated above.

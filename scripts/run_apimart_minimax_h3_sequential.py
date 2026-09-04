@@ -20,6 +20,7 @@ from apimart_h3_pipeline import *  # noqa: F401,F403
 from apimart_h3_pipeline.execution import artifacts as _artifacts
 from apimart_h3_pipeline import bridge as _bridge
 from apimart_h3_pipeline.providers import grsai as _image_editor
+from apimart_h3_pipeline.providers.grsai import aspect_ratio_for_image
 from apimart_h3_pipeline.media import video as _media
 from apimart_h3_pipeline.core import policy as _policy
 from apimart_h3_pipeline.execution import runner as _runner

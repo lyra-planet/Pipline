@@ -1,0 +1,1 @@
+Preserve the original scene and object motion while carrying out the requested camera movement.

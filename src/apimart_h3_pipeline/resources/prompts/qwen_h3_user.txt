@@ -1,4 +1,4 @@
 Raw atomic edit requirement:
 ${raw_prompt}
 
-First inspect the five parent-video frames, then the generated reference pictures, and author the final H3 prompt using only that evidence. If pictures are attached, include the temporal anchor mapping in the h3_prompt itself, not only in this message.
+Inspect the five parent-video frames and any generated reference pictures. Start h3_prompt with the raw atomic edit requirement copied verbatim, before any reference, preservation, or wrapper wording. For a camera requirement, make the named camera movement, direction, and requested strength explicit in your own wording while keeping the raw requirement first. Only after that exact raw requirement, add the minimum necessary reference or temporal-anchor wording. Keep the result concise and use only the raw requirement plus the attached visual evidence.

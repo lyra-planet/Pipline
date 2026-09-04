@@ -9,6 +9,7 @@ from .image_editor import GrsaiImageEditor
 from .providers.local import LocalH3Client, LocalH3Config, LocalH3Error, LocalH3MediaAdapter
 from .bridge import *
 from .artifacts import *
+from .resources.catalog import camera_motion_prompt, dynamic_action_prompt, image_edit_prompt
 
 __all__ = [name for name in globals() if not name.startswith("_")] + ["main", "parse_args"]
 
