@@ -11,11 +11,15 @@ input_dir=/root/autodl-tmp/ComfyUI/input
 output_dir=/root/autodl-tmp/ComfyUI/output
 summary="$root/batch_status.tsv"
 start_task_id=${APIMART_H3_START_TASK_ID:-1}
+local_server=${APIMART_H3_LOCAL_SERVER:-http://127.0.0.1:6006}
+input_dir=${APIMART_H3_LOCAL_INPUT_DIR:-$input_dir}
+output_dir=${APIMART_H3_LOCAL_OUTPUT_DIR:-$output_dir}
+lock_file=${APIMART_H3_BATCH_LOCK:-$root/.batch.lock}
+task_parity=${APIMART_H3_TASK_PARITY:-all}
 mkdir -p "$root"
 # Only one queue owner is allowed.  A second runner can otherwise submit work
 # concurrently and a cleanup/interrupt from either process can cancel the
 # other's ComfyUI sampling job.
-lock_file="$root/.batch.lock"
 exec 9>"$lock_file"
 if ! flock -n 9; then
   printf 'another local compact-plan runner already owns %s\n' "$lock_file" >&2
@@ -26,7 +30,7 @@ printf 'started=%s\n' "$(date -Is)" >> "$root/batch.log"
 wait_for_comfy() {
   local attempt
   for attempt in $(seq 1 60); do
-    if curl -fsS --max-time 5 http://127.0.0.1:6006/system_stats >/dev/null 2>&1; then
+    if curl --noproxy '*' -fsS --max-time 5 "$local_server/system_stats" >/dev/null 2>&1; then
       return 0
     fi
     printf 'comfyui_unavailable_attempt_%s\t%s\n' "$attempt" "$(date -Is)" >> "$root/batch_status.tsv"
@@ -61,6 +65,24 @@ for task in sorted(data['tasks'], key=lambda item: int(str(item['task_id']))):
     print(task['task_id'])
 PY
 ); do
+  case "$task_parity" in
+    odd)
+      if [ $((task_id % 2)) -ne 1 ]; then
+        continue
+      fi
+      ;;
+    even)
+      if [ $((task_id % 2)) -ne 0 ]; then
+        continue
+      fi
+      ;;
+    all)
+      ;;
+    *)
+      printf 'invalid APIMART_H3_TASK_PARITY=%s (expected all, odd, or even)\n' "$task_parity" >&2
+      exit 2
+      ;;
+  esac
   if [ "$task_id" -lt "$start_task_id" ]; then
     printf '%s	skipped_before_start_task_%s\t%s\n' "$task_id" "$start_task_id" "$(date -Is)" >> "$summary"
     continue
@@ -98,7 +120,7 @@ PY
     fi
     "$venv" \
       --h3-backend local \
-      --local-server http://127.0.0.1:6006 \
+      --local-server "$local_server" \
       --local-workflow-template "$template" \
       --local-input-dir "$input_dir" \
       --local-output-dir "$output_dir" \
