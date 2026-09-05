@@ -577,15 +577,10 @@ def main() -> int:
         write_json(manifest_path, manifest)
         print(json.dumps({"event": "stage_complete", "stage": stage_label, "output": str(output), "reference_escalated": reference_escalated, "attempts": len(attempts)}, ensure_ascii=False), flush=True)
     final = args.out_dir / "output.mp4"
-    final_geometry = geometry_sidecar(final)
-    final_metadata = read_json(final_geometry) if final_geometry.is_file() else {}
-    if (
-        not final.is_file()
-        or not is_aligned_video(final)
-        or final_metadata.get("role") != "final_output"
-        or final_metadata.get("geometry") != geometry.as_dict()
-    ):
-        materialize_final_video(parent, final, geometry)
+    # Always derive the final artifact from the current parent.  A resumed
+    # run can retain a valid final output from an earlier stage; checking only
+    # its geometry would incorrectly leave that stale video in place.
+    materialize_final_video(parent, final, geometry)
     manifest["output"] = str(final)
     has_propagated_failure = any(
         isinstance(item, Mapping) and item.get("propagated_failed_output") is True
