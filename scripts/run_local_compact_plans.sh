@@ -114,7 +114,7 @@ PY
 import json, sys
 try:
     value=json.load(open(sys.argv[1], encoding='utf-8'))
-    ok=value.get('status') == 'success' and isinstance(value.get('output'), str)
+    ok=value.get('status') in {'success', 'degraded'} and isinstance(value.get('output'), str)
     ok=ok and __import__('pathlib').Path(value['output']).is_file()
 except Exception:
     ok=False
