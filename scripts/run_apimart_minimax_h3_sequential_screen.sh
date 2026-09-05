@@ -18,6 +18,7 @@ http_screen=${APIMART_H3_HTTP_SCREEN:-apimart_h3_media_http_${task_id}_20260818}
 tunnel_screen=${APIMART_H3_TUNNEL_SCREEN:-apimart_h3_media_tunnel_${task_id}_20260818}
 allow_resubmit=${APIMART_H3_ALLOW_RESUBMIT:-0}
 last_stage=${APIMART_H3_LAST_STAGE:-}
+start_stage=${APIMART_H3_START_STAGE:-}
 initial_reference=${APIMART_H3_INITIAL_REFERENCE:-0}
 global_style_reference_count=${APIMART_H3_GLOBAL_STYLE_REFERENCE_COUNT:-1}
 failure_recovery=${APIMART_H3_FAILURE_RECOVERY:-targeted}
@@ -135,6 +136,9 @@ if [[ "$allow_resubmit" = 1 ]]; then
 fi
 if [[ -n "$last_stage" ]]; then
   runner_extra+=(--last-stage "$last_stage")
+fi
+if [[ -n "$start_stage" ]]; then
+  runner_extra+=(--start-stage "$start_stage")
 fi
 if [[ "$initial_reference" = 1 ]]; then
   runner_extra+=(--initial-reference)
