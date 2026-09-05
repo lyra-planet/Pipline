@@ -258,10 +258,12 @@ class LocalH3Client:
 
     def _wait_for_output(self, prompt_id: str) -> Path:
         deadline = time.monotonic() + self.config.timeout_seconds
+        missing_since: float | None = None
         while time.monotonic() < deadline:
             history = self._request_json(f"/history/{prompt_id}")
             entry = history.get(prompt_id)
             if isinstance(entry, Mapping):
+                missing_since = None
                 status = entry.get("status")
                 if isinstance(status, Mapping) and status.get("status_str") in {"error", "failed"}:
                     raise LocalH3Error(f"local ComfyUI job {prompt_id} failed: {status.get('status_str')}")
@@ -269,6 +271,32 @@ class LocalH3Client:
                     if status.get("status_str") != "success":
                         raise LocalH3Error(f"local ComfyUI job {prompt_id} ended with {status.get('status_str')}")
                     return self._history_output(entry, self.config.output_dir)
+            else:
+                # ComfyUI omits a prompt from history while it is running. If
+                # it is also absent from both queue lists for a sustained
+                # interval, the server lost the request (typically after a
+                # restart). Detect that case so the batch retry can resubmit
+                # instead of sleeping until the full six-hour timeout.
+                try:
+                    queue = self._request_json("/queue")
+                except LocalH3Error:
+                    missing_since = None
+                else:
+                    queued_ids = {
+                        str(item[1])
+                        for key in ("queue_running", "queue_pending")
+                        for item in queue.get(key, [])
+                        if isinstance(item, (list, tuple)) and len(item) > 1
+                    }
+                    if prompt_id in queued_ids:
+                        missing_since = None
+                    else:
+                        now = time.monotonic()
+                        missing_since = now if missing_since is None else missing_since
+                        if now - missing_since >= 120:
+                            raise LocalH3Error(
+                                f"local ComfyUI job {prompt_id} disappeared from history and queue"
+                            )
             time.sleep(self.config.poll_seconds)
         raise LocalH3Error(f"local ComfyUI job timed out after {self.config.timeout_seconds} seconds: {prompt_id}")
 
@@ -344,7 +372,15 @@ class LocalH3Client:
                 "previous_prompt_ids": previous_prompt_ids[-20:],
             }
             write_json(state_path, state)
-        generated = self._wait_for_output(prompt_id)
+        try:
+            generated = self._wait_for_output(prompt_id)
+        except LocalH3Error as error:
+            if "disappeared from history and queue" in str(error):
+                previous_prompt_ids.append(prompt_id)
+                state.pop("prompt_id", None)
+                state["previous_prompt_ids"] = previous_prompt_ids[-20:]
+                write_json(state_path, state)
+            raise
         destination.parent.mkdir(parents=True, exist_ok=True)
         if generated.resolve() != destination.resolve():
             shutil.copy2(generated, destination)
