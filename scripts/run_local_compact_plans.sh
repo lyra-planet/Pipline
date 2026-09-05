@@ -10,6 +10,7 @@ root=/root/autodl-tmp/Pipline_runs/local_compact_plans
 input_dir=/root/autodl-tmp/ComfyUI/input
 output_dir=/root/autodl-tmp/ComfyUI/output
 summary="$root/batch_status.tsv"
+start_task_id=${APIMART_H3_START_TASK_ID:-1}
 mkdir -p "$root"
 # Only one queue owner is allowed.  A second runner can otherwise submit work
 # concurrently and a cleanup/interrupt from either process can cancel the
@@ -60,6 +61,10 @@ for task in sorted(data['tasks'], key=lambda item: int(str(item['task_id']))):
     print(task['task_id'])
 PY
 ); do
+  if [ "$task_id" -lt "$start_task_id" ]; then
+    printf '%s	skipped_before_start_task_%s\t%s\n' "$task_id" "$start_task_id" "$(date -Is)" >> "$summary"
+    continue
+  fi
   task_dir="$root/task_$task_id"
   manifest="$task_dir/sequence_manifest.json"
   if [ "$task_id" = "1" ] && screen -ls 2>/dev/null | grep -q '\.pipline-local-task1[[:space:]]'; then
