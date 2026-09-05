@@ -22,6 +22,7 @@ initial_reference=${APIMART_H3_INITIAL_REFERENCE:-0}
 global_style_reference_count=${APIMART_H3_GLOBAL_STYLE_REFERENCE_COUNT:-1}
 failure_recovery=${APIMART_H3_FAILURE_RECOVERY:-targeted}
 allow_unverified_output=${APIMART_H3_ALLOW_UNVERIFIED_OUTPUT:-0}
+no_reference_images=${APIMART_H3_NO_REFERENCE_IMAGES:-0}
 dashscope_env=${APIMART_H3_DASHSCOPE_ENV:?APIMART_H3_DASHSCOPE_ENV is required}
 dashscope_model=${APIMART_H3_DASHSCOPE_MODEL:-qwen-vl-max}
 apimart_env=${APIMART_H3_API_ENV:?APIMART_H3_API_ENV is required}
@@ -145,6 +146,9 @@ runner_extra+=(--global-style-reference-count "$global_style_reference_count")
 runner_extra+=(--failure-recovery "$failure_recovery")
 if [[ "$allow_unverified_output" = 1 ]]; then
   runner_extra+=(--allow-unverified-output)
+fi
+if [[ "$no_reference_images" = 1 ]]; then
+  runner_extra+=(--no-reference-images)
 fi
 runner_command=(python3 "$runner")
 if [[ -n "$proxy_wrapper" ]]; then

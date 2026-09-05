@@ -90,6 +90,10 @@ def parse_args() -> argparse.Namespace:
         help="reference count for ordinary static bridges; global styles use one anchor first and three only on failed retry",
     )
     parser.add_argument(
+        "--no-reference-images", action="store_true",
+        help="force all stages in this run to use no generated or attached reference images",
+    )
+    parser.add_argument(
         "--failure-recovery",
         choices=("targeted", "fixed-three-anchor", "disabled"),
         default="targeted",

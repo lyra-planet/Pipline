@@ -83,11 +83,17 @@ def bridge_for_stage(
     failure_observation: str | None = None,
     repair_context: Mapping[str, Any] | None = None,
     geometry: CanvasGeometry | None = None,
+    force_no_reference_images: bool = False,
 ) -> tuple[list[str], str, dict[str, Any]]:
     stage_label = stage_dir.name
     image_edit_model = image_model_for_stage(stage_label)
     editor.model = image_edit_model
     base_policy = reference_policy(next_prompt, global_style_reference_count)
+    if force_no_reference_images:
+        base_policy = dict(base_policy)
+        base_policy["needs_reference_image"] = False
+        base_policy["reference_image_count"] = 0
+        base_policy["policy_reason"] = "forced_no_reference_images"
     repair_context = dict(repair_context) if repair_context is not None else None
     if repair_context is not None:
         try:

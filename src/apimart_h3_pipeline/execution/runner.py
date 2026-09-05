@@ -305,6 +305,7 @@ def main() -> int:
                 bridge_failure_observation,
                 repair_context,
                 geometry=geometry,
+                force_no_reference_images=bool(getattr(args, "no_reference_images", False)),
             )
             if apimart.is_ctmoai:
                 reusable_url = reusable_h3_video_url(state_path, h3_prompt, image_urls)
