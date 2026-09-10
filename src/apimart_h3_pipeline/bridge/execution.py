@@ -19,10 +19,15 @@ from ..resources.catalog import (
     dynamic_action_prompt,
     image_edit_prompt,
 )
-from ..providers.vision_refiner import DashScopeVisionRefiner
+from ..providers.vision_refiner import (
+    FAILURE_REPAIR_PROMPT_VERSION,
+    DashScopeVisionRefiner,
+)
 
 from .helpers import (
     deterministic_repair_h3_prompt,
+    final_h3_prompt_contract_is_valid,
+    validate_final_h3_prompt_contract,
     load_task,
     prior_primary_reference,
     public_url,
@@ -121,6 +126,9 @@ def bridge_for_stage(
         refiner_metadata = bridge.get("refiner")
         final_refiner_metadata = bridge.get("final_refiner")
         expected_count = int(policy["reference_image_count"])
+        expected_failure_repair_prompt_version = (
+            FAILURE_REPAIR_PROMPT_VERSION if repair_context is not None else None
+        )
         saved_selected_frame = bridge.get("selected_frame_index")
         first_frame_reference = expected_count == 0 or saved_selected_frame in QWEN_CONTEXT_FRAME_INDICES
         if (
@@ -138,6 +146,8 @@ def bridge_for_stage(
             and refiner_metadata.get("model") == refiner.model
             and isinstance(final_refiner_metadata, Mapping)
             and final_refiner_metadata.get("model") == refiner.model
+            and final_refiner_metadata.get("failure_repair_prompt_version")
+            == expected_failure_repair_prompt_version
             and bridge.get("failure_observation") == failure_observation
             and bridge.get("repair_context") == repair_context
             and bridge.get("reference_geometry") == (
@@ -151,6 +161,14 @@ def bridge_for_stage(
             and (
                 not is_camera_motion_edit(next_prompt)
                 or h3_prompt == normalized_prompt(next_prompt)
+            )
+            and final_h3_prompt_contract_is_valid(
+                h3_prompt=h3_prompt,
+                final_refiner=final_refiner_metadata,
+                reference_images=bridge.get("reference_images", []),
+                reference_roles=bridge.get("reference_roles", []),
+                expected_reference_count=expected_count,
+                require_reference_aware_regeneration=expected_count > 0,
             )
         ):
             if not isinstance(image_urls, list) or not all(isinstance(url, str) for url in image_urls):
@@ -225,7 +243,57 @@ def bridge_for_stage(
     for context_frame, frame_index in zip(context_frames, QWEN_CONTEXT_FRAME_INDICES, strict=True):
         select_keyframe(previous_video, context_frame, frame_index)
     context_by_index = dict(zip(QWEN_CONTEXT_FRAME_INDICES, context_frames, strict=True))
-    reference_count = int(policy["reference_image_count"])
+    # During semantic fallback the model, rather than the failure label or
+    # original topology, chooses video-only, one-anchor, or three-anchor
+    # repair. Its decision also supplies the per-frame image-edit prompts.
+    repair_anchor_plan: dict[str, Any] | None = None
+    if repair_context is not None:
+        plan_path = bridge_dir / f"{file_prefix}_qwen_failure_repair_plan.json"
+        cached = read_json(plan_path) if plan_path.is_file() else {}
+        cached_result = cached.get("result") if isinstance(cached, Mapping) else None
+        if (
+            cached.get("kind") == "qwen_failure_repair_plan_v1"
+            and cached.get("previous_video") == str(previous_video)
+            and cached.get("raw_prompt") == next_prompt
+            and cached.get("failed_h3_prompt") == str(repair_context.get("failed_prompt", ""))
+            and cached.get("failure_observation") == failure_observation
+            and isinstance(cached_result, Mapping)
+        ):
+            repair_anchor_plan = dict(cached_result)
+        else:
+            existing_refs: list[Path] = []
+            existing_roles: list[Mapping[str, Any]] = []
+            if bridge_path.is_file():
+                previous_bridge = read_json(bridge_path)
+                for item in previous_bridge.get("reference_images", []):
+                    image_path = Path(str(item))
+                    if image_path.is_file():
+                        existing_refs.append(image_path)
+                if isinstance(previous_bridge.get("reference_roles"), list):
+                    existing_roles = [item for item in previous_bridge["reference_roles"] if isinstance(item, Mapping)]
+            repair_anchor_plan = refiner.plan_failure_repair(
+                context_frames,
+                existing_refs,
+                next_prompt,
+                str(repair_context.get("failed_prompt", "")),
+                str(repair_context.get("failure_type", "unclassified")),
+                failure_observation or str(repair_context.get("observer_evidence", "")),
+                existing_roles,
+            )
+            write_json(plan_path, {
+                "kind": "qwen_failure_repair_plan_v1",
+                "previous_video": str(previous_video),
+                "raw_prompt": next_prompt,
+                "failed_h3_prompt": str(repair_context.get("failed_prompt", "")),
+                "failure_observation": failure_observation,
+                "result": repair_anchor_plan,
+            })
+        reference_count = int(repair_anchor_plan["reference_image_count"])
+        policy["needs_reference_image"] = reference_count > 0
+        policy["reference_image_count"] = reference_count
+        policy["policy_reason"] = "qwen_failure_repair:" + str(repair_anchor_plan["reference_policy"])
+    else:
+        reference_count = int(policy["reference_image_count"])
     reference_plan: dict[str, Any] = {"model": refiner.model, "mode": "no_reference_image"}
     three_anchor_plan: dict[str, Any] | None = None
     reference_images: list[Path] = []
@@ -233,16 +301,20 @@ def bridge_for_stage(
     reference_roles: list[dict[str, Any]] = []
 
     if bool(policy["needs_reference_image"]):
+        # A Qwen failure-repair plan supplies frame-specific image prompts.
+        # Never reuse an earlier primary reference under that plan: it may be
+        # tied to a different source frame or a different semantic role.
+        can_reuse_primary = repair_anchor_plan is None and (
+            reference_count == 3
+            or (
+                repair_context is not None
+                and bool(repair_context.get("reuse_primary_reference"))
+                and reference_count in {1, 3}
+            )
+        )
         prior_reference = (
             prior_primary_reference(stage_dir, previous_video, next_prompt, refiner.model)
-            if (
-                reference_count == 3
-                or (
-                    repair_context is not None
-                    and bool(repair_context.get("reuse_primary_reference"))
-                    and reference_count in {1, 3}
-                )
-            ) else None
+            if can_reuse_primary else None
         )
         if prior_reference is not None:
             reference_plan, archived_primary = prior_reference
@@ -256,6 +328,27 @@ def bridge_for_stage(
                 "output": str(primary_reference),
                 "content_output": str(primary_reference),
                 "edit_input": str(primary_reference),
+            }
+        elif repair_anchor_plan is not None:
+            selected_frame_index = int(repair_anchor_plan["anchor_frame_indices"][0])
+            primary_reference = bridge_dir / f"{file_prefix}_reference_frame_{selected_frame_index:03d}.png"
+            primary_edit_input = context_by_index[selected_frame_index]
+            primary_edit_prompt = str(repair_anchor_plan["image_edit_prompts"][0]["prompt"])
+            primary_edit_state, _ = _edit_reference_image(
+                editor,
+                canvas_input=primary_edit_input,
+                raw_prompt=next_prompt,
+                edit_prompt=primary_edit_prompt,
+                output=primary_reference,
+                state_path=bridge_dir / f"{file_prefix}_image_edit_state_frame_{selected_frame_index:03d}.json",
+                geometry=geometry,
+            )
+            reference_plan = {
+                "model": refiner.model,
+                "selected_frame_index": selected_frame_index,
+                "selection_reason": "Qwen-VL failure repair planner selected this anchor",
+                "image_edit_prompt": primary_edit_prompt,
+                "image_edit_prompt_source": "qwen_vl_failure_repair",
             }
         else:
             reference_plan_path = bridge_dir / f"{file_prefix}_qwen_reference_plan.json"
@@ -315,8 +408,19 @@ def bridge_for_stage(
             reference_roles = expected_reference_roles(reference_count, selected_frame_index)
         elif reference_count == GLOBAL_STYLE_REFERENCE_COUNT:
             three_anchor_plan_path = bridge_dir / f"{file_prefix}_three_anchor_plan.json"
-            three_anchor_plan_state = read_json(three_anchor_plan_path) if three_anchor_plan_path.is_file() else {}
-            if (
+            if repair_anchor_plan is not None:
+                anchor_indices = list(repair_anchor_plan["anchor_frame_indices"])
+                three_anchor_plan = {
+                    "style_reference_frame_index": anchor_indices[0],
+                    "middle_frame_index": anchor_indices[1],
+                    "end_frame_index": anchor_indices[2],
+                    "middle_image_edit_prompt": repair_anchor_plan["image_edit_prompts"][1]["prompt"],
+                    "end_image_edit_prompt": repair_anchor_plan["image_edit_prompts"][2]["prompt"],
+                    "image_edit_prompt_source": "qwen_vl_failure_repair",
+                }
+            else:
+                three_anchor_plan_state = read_json(three_anchor_plan_path) if three_anchor_plan_path.is_file() else {}
+            if repair_anchor_plan is None and (
                 three_anchor_plan_state.get("kind") == "three_anchor_reference_plan_v1"
                 and three_anchor_plan_state.get("previous_video") == str(previous_video)
                 and three_anchor_plan_state.get("raw_prompt") == next_prompt
@@ -333,7 +437,7 @@ def bridge_for_stage(
                 and isinstance(three_anchor_plan_state["result"].get("end_image_edit_prompt"), str)
             ):
                 three_anchor_plan = dict(three_anchor_plan_state["result"])
-            else:
+            elif repair_anchor_plan is None:
                 three_anchor_plan = three_anchor_reference_plan(
                     refiner.model,
                     next_prompt,
@@ -349,9 +453,10 @@ def bridge_for_stage(
                     "primary_reference": str(primary_reference),
                     "result": three_anchor_plan,
                 })
-            three_anchor_plan["middle_image_edit_prompt"] = image_edit_prompt(next_prompt)
-            three_anchor_plan["end_image_edit_prompt"] = image_edit_prompt(next_prompt)
-            three_anchor_plan["image_edit_prompt_source"] = "raw_atomic_prompt_with_preservation_constraint"
+            if repair_anchor_plan is None:
+                three_anchor_plan["middle_image_edit_prompt"] = image_edit_prompt(next_prompt)
+                three_anchor_plan["end_image_edit_prompt"] = image_edit_prompt(next_prompt)
+                three_anchor_plan["image_edit_prompt_source"] = "raw_atomic_prompt_with_preservation_constraint"
             # The first-frame primary is the shared style master. The middle
             # and end anchors are edited from their own parent frames while
             # receiving that first-frame image as an explicit style reference.
@@ -388,32 +493,39 @@ def bridge_for_stage(
             # master, middle temporal anchor, then end temporal anchor.
             reference_images = [primary_reference, middle_reference, end_reference]
             image_edits = [primary_edit_state, middle_edit_state, end_edit_state]
-            reference_roles = expected_reference_roles(reference_count, selected_frame_index)
+            if repair_anchor_plan is not None:
+                anchor_indices = list(repair_anchor_plan["anchor_frame_indices"])
+                reference_roles = [
+                    {"picture_index": 1, "role": "edited start anchor", "source_frame_index": anchor_indices[0]},
+                    {"picture_index": 2, "role": "edited middle anchor", "source_frame_index": anchor_indices[1]},
+                    {"picture_index": 3, "role": "edited end anchor", "source_frame_index": anchor_indices[2]},
+                ]
+            else:
+                reference_roles = expected_reference_roles(reference_count, selected_frame_index)
         else:
             raise ApimartError(f"unsupported reference image count: {reference_count}")
 
-    if repair_context is not None and repair_context.get("mode") != "fixed_three_anchor":
-        # A camera stage that failed the motion gate must use the targeted
-        # repair prompt.  Keep this branch before the normal camera path so a
-        # retry cannot silently fall back to the unchanged first-attempt text.
-        h3_prompt = deterministic_repair_h3_prompt(
+    if repair_context is not None:
+        # Let Qwen-VL revise the failed prompt while seeing the actual source
+        # frames, reference images, and Observer evidence. This prevents a
+        # generic deterministic clause from masking the concrete failure.
+        final_refinement = refiner.compose_h3_prompt(
+            context_frames,
+            reference_images,
             next_prompt,
-            len(reference_images),
+            bool(policy.get("is_global_style")),
             reference_roles,
-            repair_context,
+            failure_observation,
+            failed_h3_prompt=str(repair_context.get("failed_prompt", "")),
+            repair_action=str(repair_context.get("repair_action", "targeted_repair")),
+            failure_type=str(repair_context.get("failure_type", "")),
         )
+        final_refinement["h3_prompt_source"] = "qwen_vl_failure_repair"
+        final_refinement["repair_action"] = repair_context["repair_action"]
+        h3_prompt = str(final_refinement["h3_prompt"])
         if is_camera_motion_edit(next_prompt) and not h3_prompt.startswith(VIDEO_EDIT_PREFIX):
             h3_prompt = f"{VIDEO_EDIT_PREFIX} {h3_prompt}"
-        final_refinement = {
-            "model": refiner.model,
-            "h3_prompt": h3_prompt,
-            "h3_prompt_source": "vetra_deterministic_repair",
-            "frame_observation": "repair prompt built from closed-set action",
-            "picture_count": len(reference_images),
-            "is_global_style": bool(policy.get("is_global_style")),
-            "repair_action": repair_context["repair_action"],
-            "usage": {},
-        }
+            final_refinement["h3_prompt"] = h3_prompt
     elif is_camera_motion_edit(next_prompt):
         # Camera stages use the same official four-section Qwen prompt as all
         # other stages. The observer, rather than a local image metric or a
@@ -439,6 +551,19 @@ def bridge_for_stage(
             failure_observation,
         )
         h3_prompt = str(final_refinement["h3_prompt"])
+    # Keep the provenance explicit even for lightweight test/dry-run refiner
+    # implementations that return only the prompt body.
+    final_refinement.setdefault("h3_prompt_source", "qwen_vl_direct")
+    validate_final_h3_prompt_contract(
+        h3_prompt=h3_prompt,
+        final_refiner=final_refinement,
+        reference_images=reference_images,
+        reference_roles=reference_roles,
+        expected_reference_count=reference_count,
+        require_reference_aware_regeneration=reference_count > 0,
+    )
+    optimized_prompt_path = bridge_dir / f"{file_prefix}_optimized_h3_prompt.txt"
+    optimized_prompt_path.write_text(h3_prompt.strip() + "\n", encoding="utf-8")
     bridge: dict[str, Any] = {
         "kind": BRIDGE_KIND,
         "stage_id": stage_label,
@@ -455,11 +580,17 @@ def bridge_for_stage(
         "image_edit_model": image_edit_model,
         "selection_reason": reference_plan.get("selection_reason", ""),
         "h3_prompt": h3_prompt,
+        "optimized_h3_prompt_path": str(optimized_prompt_path),
         "refiner": reference_plan,
         "reference_plan": reference_plan,
         "three_anchor_plan": three_anchor_plan,
+        "qwen_failure_repair_plan": repair_anchor_plan,
         "final_refiner": final_refinement,
         "reference_images": [str(image) for image in reference_images],
+        "reference_aware_prompt_regenerated": bool(reference_images),
+        "reference_images_attached_to_final_prompt": [str(image) for image in reference_images],
+        "reference_roles_attached_to_final_prompt": reference_roles,
+        "final_prompt_is_provisional_without_new_references": False,
         "image_edits": image_edits,
         "image_uploads": [],
         "image_urls": [],

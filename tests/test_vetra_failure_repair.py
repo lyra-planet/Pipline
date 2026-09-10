@@ -707,7 +707,18 @@ class VetraRunnerStateMachineTests(unittest.TestCase):
                         "usage": {},
                     }
 
-                def compose_h3_prompt(self, frames, references, prompt, is_global_style, reference_roles=(), failure_observation=None):
+                def compose_h3_prompt(
+                    self,
+                    frames,
+                    references,
+                    prompt,
+                    is_global_style,
+                    reference_roles=(),
+                    failure_observation=None,
+                    failed_h3_prompt=None,
+                    repair_action=None,
+                    failure_type=None,
+                ):
                     self.compose_calls += 1
                     tags = " ".join(f"<Picture {i}>" for i in range(1, len(references) + 1))
                     roles = " ".join(

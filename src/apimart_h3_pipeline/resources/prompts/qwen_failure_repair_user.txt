@@ -1,0 +1,16 @@
+Raw atomic prompt (authoritative; preserve its intent exactly):
+${raw_prompt}
+
+Previous H3 prompt that failed:
+${failed_h3_prompt}
+
+Observer failure type:
+${failure_type}
+
+Observer evidence:
+${failure_observation}
+
+Candidate source-frame indices, in playback order:
+${frame_indices}
+
+Existing Picture references, if any, are attached after the source frames. Treat them as evidence of the attempted appearance, not as a replacement for the raw atomic prompt.

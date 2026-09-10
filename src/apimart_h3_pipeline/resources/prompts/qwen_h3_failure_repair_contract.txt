@@ -1,0 +1,15 @@
+Fallback repair contract for the final MiniMax-H3 prompt:
+
+Use the supplied evidence and existing fallback prompt to make the requested edit concrete. Do not copy the atomic prompt verbatim. The returned prompt must contain only a usable video-editing instruction; do not mention Observer, metadata, failure, retry, model, repair process, or this contract.
+
+Failure evidence: ${failure_observation}
+Repair action: ${repair_action}
+
+Describe the correction once, with concrete wording rather than a generic "apply the edit" sentence:
+1. Start with the exact prefix: [video editing] The target video is an edited version of <Video 1>. Then state the detailed visible correction.
+2. If a reference picture is attached, identify its corresponding frame and explain what visual content it provides as a reference.
+3. Do not output subject_definitions, retention_analysis, section labels, metadata, failure analysis, or preservation boilerplate.
+
+These repetitions must express one consistent repair, not four different edits. Preserve every unrequested element, but do not over-constrain the requested edit. If the repair changes action, pose, expression, object appearance, background, style, or camera behavior, explicitly allow the corresponding pixels, positions, framing, or motion to change as required. Do not invent timing, frame numbers, camera operations, objects, people, or motion beyond the raw requirement and visible evidence. A still Picture constrains only its mapped source frame and cannot create motion. For speed, timing, duration, or other temporal-rate changes, do not pretend a static Picture proves the rate change; use video-only instructions unless the raw requirement explicitly includes a visible appearance target.
+
+Use preservation wording only once. Do not repeat synonymous phrases such as "all other visual content remains unchanged," "preserved exactly," "must not persist in any frame," or "do not alter anything else." The repair itself may be repeated for clarity, but preservation constraints must stay concise so they do not suppress the requested edit.

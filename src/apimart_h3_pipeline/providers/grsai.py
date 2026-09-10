@@ -38,6 +38,19 @@ GRSAI_FAILED_RETRY_SECONDS = 60
 GRSAI_OTHER_RETRY_LIMIT = 10
 GRSAI_OTHER_RETRY_SECONDS = 10
 GRSAI_IMAGE_MODEL = "nano-banana-2"
+GRSAI_TERMINAL_FAILURE_STATUSES = {
+    "failed",
+    "error",
+    "cancelled",
+    "canceled",
+    "rejected",
+    "expired",
+    "violation",
+    "blocked",
+    "content_violation",
+    "safety_violation",
+    "moderation_failed",
+}
 
 
 def image_model_for_stage(stage_id: str) -> str:
@@ -341,7 +354,7 @@ class GrsaiImageEditor:
                 {"model": model, "prompt": image_edit_prompt, "images": image_inputs, "aspectRatio": aspect_ratio, "replyType": "async"},
             )
             initial_status = self.response_status(response)
-            if initial_status in {"failed", "error", "cancelled", "canceled", "rejected", "expired"}:
+            if initial_status in GRSAI_TERMINAL_FAILURE_STATUSES:
                 detail = self.response_error(response)
                 failed_state = {
                     "status": "failed",
@@ -376,9 +389,28 @@ class GrsaiImageEditor:
         while not url and task_id and time.monotonic() - started < self.timeout_seconds:
             time.sleep(5)
             polls += 1
-            result = self.request("GET", f"{self.base_url}/v1/api/result?{urllib.parse.urlencode({'id': task_id})}")
+            try:
+                result = self.request("GET", f"{self.base_url}/v1/api/result?{urllib.parse.urlencode({'id': task_id})}")
+            except ApimartError as error:
+                # A persisted async task can disappear before the next poll
+                # (provider expiry or a worker restart). Mark it non-resumable
+                # so the bounded outer retry submits a fresh task instead of
+                # polling the same missing ID forever.
+                if "HTTP 404" in str(error):
+                    write_json(state_path, {
+                        "status": "expired",
+                        "model": model,
+                        "raw_prompt": raw_prompt,
+                        "image_edit_prompt": image_edit_prompt,
+                        "style_reference": str(style_reference) if style_reference else None,
+                        "task_id": task_id,
+                        "polls": polls,
+                        "aspect_ratio": aspect_ratio,
+                        "error": str(error),
+                    })
+                raise
             status = self.response_status(result)
-            if status in {"failed", "error", "cancelled", "canceled", "rejected", "expired"}:
+            if status in GRSAI_TERMINAL_FAILURE_STATUSES:
                 detail = self.response_error(result)
                 write_json(state_path, {
                     "status": "failed",

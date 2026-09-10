@@ -14,7 +14,14 @@ from typing import Any, Mapping, Sequence
 from ..providers.apimart import ApimartError, write_json
 from ..core.repair_policy import RepairValidationError, validate_observation
 
-from ..core.constants import H3_CLIENT_MODULE, H3_FRAME_COUNT, H3_FPS, H3_CANVAS_WIDTH, H3_CANVAS_HEIGHT
+from ..core.constants import (
+    H3_CLIENT_MODULE,
+    H3_FRAME_COUNT,
+    H3_FPS,
+    H3_CANVAS_WIDTH,
+    H3_CANVAS_HEIGHT,
+    POST_EDIT_OBSERVER_FRAME_INDICES,
+)
 from ..media import CanvasGeometry, has_audio, is_aligned_video, is_h3_input_video, is_h3_generated_video, materialize_stage_video, read_json, source_canvas_geometry, write_geometry_sidecar
 from ..core.policy import normalized_prompt
 from ..providers.local import LocalH3Client, LocalH3Config
@@ -158,6 +165,12 @@ def load_archived_attempts(stage_dir: Path) -> list[dict[str, Any]]:
 def load_current_observation(stage_dir: Path, stage_label: str) -> dict[str, Any] | None:
     candidate = read_optional_json(stage_dir / "observation" / "observation.json")
     if candidate.get("stage") != stage_label:
+        return None
+    # Do not reuse a legacy five-frame gate after the temporal Observer
+    # upgrade. A resumed run must re-observe with the current checkpoints.
+    if candidate.get("kind") != "qwen_vl_uniform_temporal_success_gate_v2":
+        return None
+    if candidate.get("frame_indices") != list(POST_EDIT_OBSERVER_FRAME_INDICES):
         return None
     # Output-only observations cannot validate preservation.  Re-observe old
     # records on resume once paired source/output inspection is available.

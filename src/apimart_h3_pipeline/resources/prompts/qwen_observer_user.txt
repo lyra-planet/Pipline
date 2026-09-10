@@ -1,4 +1,6 @@
-Atomic edit to inspect:
+Atomic editing requirement:
 ${raw_prompt}
 
-The attached images are five uniformly sampled checkpoints in playback order. When two sets are attached, the first set is the source video and the second set is the generated output; compare matching pairs at frames 0, 26, 53, 80, and 106. First establish what remains constant from source to output. Then decide whether the exact operation named in the atomic prompt is visible throughout the sequence. For a camera request, identify the actual camera operation and distinguish it from subject motion, another camera operation, crop, cut, or scene replacement. Do not infer success from the prompt alone. Put concise visual evidence in observation and observer_evidence, but return only the four required JSON keys.
+The attached checkpoints are in chronological order at frames 0, 12, 24, 35, 47, 59, 71, 82, 94, and 106. When source checkpoints are attached, they appear first and the generated output checkpoints appear second; compare each source frame with the output frame carrying the same index.
+
+Use the full set of checkpoints as temporal evidence. Do not require an action or visual effect to appear at every checkpoint: locate the relevant event or visible-target interval and judge whether the requested result occurs there and remains coherent afterward. For a persistent edit, check for later reappearance or drift. For a motion, speed, or camera request, judge the progression and direction across multiple consecutive checkpoints rather than a static difference. Base the decision on what is visible in the images, and return only the required JSON object.

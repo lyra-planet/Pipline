@@ -33,6 +33,7 @@ PROMPT_FILES = (
     "qwen_h3_global_style_suffix.txt",
     "qwen_h3_failure_evidence.txt",
     "qwen_h3_user.txt",
+    "qwen_h3_failure_repair_user.txt",
     "qwen_observer_system.txt",
     "qwen_observer_user.txt",
     "h3_temporal_anchor.txt",
@@ -70,6 +71,21 @@ def test_render_prompt_requires_all_template_values() -> None:
     assert "${" not in rendered
     assert "Change color." in rendered
     assert "anchors" in rendered
+
+
+def test_failure_repair_prompt_requires_the_observed_defect_to_be_repeated() -> None:
+    rendered = render_prompt(
+        "qwen_h3_failure_repair_user.txt",
+        raw_prompt="Replace the background.",
+        failed_h3_prompt="Change the scene.",
+        failure_observation="the background was unchanged",
+        failure_type="edit_missing",
+        repair_action="strengthen_edit",
+    )
+    assert "the background was unchanged" in rendered
+    assert "must visibly" in rendered
+    assert "must not persist" in rendered
+    assert "Do not return JSON" in rendered
 
 
 def test_qwen_h3_prompt_contract_puts_operation_before_references() -> None:

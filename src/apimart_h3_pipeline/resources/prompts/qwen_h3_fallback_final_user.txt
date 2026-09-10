@@ -1,0 +1,13 @@
+Original editing intent:
+${raw_prompt}
+
+Previous prompt, evidence only and not a template:
+${failed_h3_prompt}
+
+Visual defect to address within the original intent:
+${failure_observation}
+
+Actual attached picture mapping (translate technical indices into natural timing in your output):
+${role_contract}
+
+Inspect the supplied source frames and actual pictures. Return only the final editing prompt in the specified compact format.

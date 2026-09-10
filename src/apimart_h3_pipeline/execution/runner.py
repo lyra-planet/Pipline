@@ -18,7 +18,7 @@ from .artifacts import archive_stage_attempt, attempt_number_from_path, confirme
 from ..bridge import bridge_for_stage, deterministic_repair_h3_prompt, load_task, public_url, three_anchor_reference_plan
 from ..core.constants import DEFAULT_STATIC_REFERENCE_COUNT, H3_CANVAS_HEIGHT, H3_CANVAS_WIDTH, PROMPT_KEY, QWEN_CONTEXT_FRAME_INDICES
 from ..media import CanvasGeometry, geometry_sidecar, has_audio, is_aligned_video, is_h3_input_video, load_geometry_sidecar, materialize_final_video, materialize_initial_video, materialize_stage_video, source_canvas_geometry, write_geometry_sidecar
-from ..core.policy import is_camera_motion_edit, reference_policy
+from ..core.policy import reference_policy
 from ..providers.vision_refiner import DashScopeVisionRefiner, observe_stage_output
 from ..providers.grsai import GrsaiImageEditor
 from ..providers.local import LocalH3MediaAdapter
@@ -138,16 +138,15 @@ def main() -> int:
         "intermediate_inputs": "all stage inputs are 1344x768, 107 frames, 24 fps",
         "final_output": "crop to the fitted content rectangle; no geometric stretch",
     }
+    # Camera edits use the same bridge/H3/Observer path as every other edit.
+    # Retain an explicit disabled policy marker for manifests from this runner.
     manifest["camera_stage_skip_policy"] = {
-        "enabled": True,
-        "rule": "skip stages whose raw atomic prompt explicitly requests camera movement",
-        "preserve_previous_video": True,
+        "enabled": False,
+        "rule": "camera stages are processed normally; no special skip channel",
+        "preserve_previous_video": False,
     }
-    existing_camera_skips = manifest.get("camera_stage_skips")
-    if not isinstance(existing_camera_skips, list):
-        existing_camera_skips = []
-    manifest["camera_stage_skips"] = existing_camera_skips
-    manifest["camera_stage_skip_count"] = len(existing_camera_skips)
+    manifest["camera_stage_skips"] = []
+    manifest["camera_stage_skip_count"] = 0
     initial_target = args.media_dir / f"task_{task['task_id']}_initial.mp4"
     if prepared_initial is not None:
         if not initial_target.is_file() or initial_target.stat().st_size != prepared_initial.stat().st_size:
@@ -234,65 +233,6 @@ def main() -> int:
         raw_prompt = stage["prompt"]
         stage_parent_video = parent
         stage_parent_url = parent_url
-        if is_camera_motion_edit(raw_prompt):
-            # Camera-only edits are intentionally omitted from this run. Keep
-            # the previous stage video byte-for-byte as the next stage input so
-            # later content edits continue from the correct visual state.
-            output.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(parent, output)
-            write_geometry_sidecar(output, geometry, "stage_input")
-            media_output = materialize_stage_video(
-                output,
-                args.media_dir / f"task_{task['task_id']}_{stage_label}.mp4",
-                geometry,
-            )
-            parent = media_output
-            parent_url = next_parent_video_url(
-                apimart,
-                parent,
-                None,
-                args.media_public_base_url,
-                backend,
-            )
-            skip_entry = {
-                "stage": stage_label,
-                "raw_prompt": raw_prompt,
-                "status": "skipped_camera_motion",
-                "skip_reason": "camera_motion_stage_disabled",
-                "h3_prompt": None,
-                "output": str(output),
-                "media": str(media_output),
-                "h3_input_video_url": str(stage_parent_url),
-                "next_parent_video_url": parent_url,
-                "has_reference_image": False,
-                "reference_image_count": 0,
-                "reused_existing_output": False,
-                "post_edit_observation": None,
-                "reference_escalated": False,
-                "attempts": [],
-                "diagnosis": None,
-                "repair": None,
-                "propagated_failed_output": False,
-                "observer_skipped": True,
-            }
-            replace_manifest_stage(manifest, skip_entry)
-            skipped = [
-                item for item in manifest["camera_stage_skips"]
-                if isinstance(item, Mapping) and item.get("stage") != stage_label
-            ]
-            skipped.append({"stage": stage_label, "raw_prompt": raw_prompt, "reason": skip_entry["skip_reason"]})
-            manifest["camera_stage_skips"] = skipped
-            manifest["camera_stage_skip_count"] = len(skipped)
-            manifest["status"] = "running"
-            write_json(manifest_path, manifest)
-            print(json.dumps({
-                "event": "stage_skipped",
-                "stage": stage_label,
-                "reason": skip_entry["skip_reason"],
-                "camera_stage_skip_count": len(skipped),
-                "camera_stage_skips": [item["stage"] for item in skipped],
-            }, ensure_ascii=False), flush=True)
-            continue
         base_policy = reference_policy(raw_prompt, args.global_style_reference_count)
         # A stage's parent is immutable across semantic retries. A failed H3
         # output is a candidate for observation/archive only; it must never

@@ -239,7 +239,9 @@ workflow，并轮询 `/history/{prompt_id}`。runner 将当前 parent video 和 
 `ReferenceToVideo` 节点、一个 `LoadVideo` 节点和一个 `SaveVideo` 节点；节点按
 `class_type` 发现，模板可以来自不同的 ComfyUI 导出。
 
-## 11. 五帧成功门、失败诊断和定向修复
+## 11. Observer 时间覆盖、失败诊断和定向修复
+
+H3 prompt/参考图上下文仍使用 `0/26/53/80/106` 五帧；post-edit Observer 已独立升级为 CoVEBench 风格的十个等间隔检查点 `0/12/24/35/47/59/71/82/94/106`。因此本节中涉及“输出五帧成功门”的旧描述仅适用于历史记录，新的 `observation.json` 使用 `qwen_vl_uniform_temporal_success_gate_v2`。动作、速度和事件触发特效按时间进展判断，不要求效果在每个检查点都出现；无法由静态检查点可靠判断的时序问题返回 `not_frame_judgeable`，不直接触发语义修复。
 
 H3 输出完成后，Qwen 用输出的 0、26、53、80、106 五帧检查 atomic edit：
 

@@ -189,6 +189,96 @@ def upload_bridge_image(
     return upload_reference_image(apimart, image)
 
 
+def validate_final_h3_prompt_contract(
+    *,
+    h3_prompt: Any,
+    final_refiner: Mapping[str, Any] | None,
+    reference_images: Sequence[Any],
+    reference_roles: Sequence[Mapping[str, Any]],
+    expected_reference_count: int,
+    require_reference_aware_regeneration: bool = True,
+) -> None:
+    """Reject a bridge that could submit a provisional or mismapped prompt.
+
+    The fallback planner is allowed to choose zero, one, or three references.
+    This validator deliberately does not choose that topology; it only checks
+    that the topology selected by Qwen is represented consistently in the
+    final prompt and bridge metadata before H3 submission.
+    """
+
+    if expected_reference_count not in {0, 1, 3}:
+        raise ApimartError(
+            f"unsupported final reference count for prompt validation: {expected_reference_count}"
+        )
+    if not isinstance(h3_prompt, str) or not h3_prompt.strip():
+        raise ApimartError("final H3 prompt is empty")
+    if "<Video 1>" not in h3_prompt:
+        raise ApimartError("final H3 prompt does not identify <Video 1> as the source video")
+    if not isinstance(final_refiner, Mapping):
+        # A video-only fallback has no reference-aware compose artifact to
+        # attach. Its prompt still has to identify the source video and avoid
+        # Picture tags; reference-backed prompts never get this exemption.
+        if expected_reference_count == 0:
+            if "<Picture" in h3_prompt:
+                raise ApimartError("video-only H3 prompt unexpectedly contains a Picture reference")
+            return
+        raise ApimartError("bridge lacks final Qwen-VL prompt metadata")
+    if final_refiner.get("h3_prompt") != h3_prompt:
+        raise ApimartError("bridge final_refiner does not match the submitted H3 prompt")
+    if final_refiner.get("picture_count") != expected_reference_count:
+        raise ApimartError(
+            "final Qwen picture count does not match the reference policy: "
+            f"{final_refiner.get('picture_count')} != {expected_reference_count}"
+        )
+    if require_reference_aware_regeneration and expected_reference_count:
+        if final_refiner.get("h3_prompt_source") not in {
+            "qwen_vl_direct",
+            "qwen_vl_direct_camera",
+            "qwen_vl_failure_repair",
+        }:
+            raise ApimartError(
+                "reference-backed H3 prompt was not produced by the final Qwen-VL compose step"
+            )
+
+    if len(reference_images) != expected_reference_count:
+        raise ApimartError(
+            "reference image count does not match the reference policy: "
+            f"{len(reference_images)} != {expected_reference_count}"
+        )
+    if len(reference_roles) != expected_reference_count:
+        raise ApimartError(
+            "reference role count does not match the reference policy: "
+            f"{len(reference_roles)} != {expected_reference_count}"
+        )
+
+    # Qwen's final plain-text prompt must explicitly bind every supplied
+    # picture. The role metadata remains the authoritative frame mapping.
+    for picture_index, role in enumerate(reference_roles, 1):
+        tag = f"<Picture {picture_index}>"
+        if tag not in h3_prompt:
+            raise ApimartError(f"final H3 prompt is missing {tag}")
+        if role.get("picture_index") != picture_index:
+            raise ApimartError(f"reference role {picture_index} has an invalid picture index")
+        frame_index = role.get("source_frame_index")
+        if not isinstance(frame_index, int) or frame_index not in QWEN_CONTEXT_FRAME_INDICES:
+            raise ApimartError(
+                f"reference role {picture_index} has an unavailable source frame: {frame_index}"
+            )
+
+    if expected_reference_count == 0 and "<Picture" in h3_prompt:
+        raise ApimartError("video-only H3 prompt unexpectedly contains a Picture reference")
+
+
+def final_h3_prompt_contract_is_valid(**kwargs: Any) -> bool:
+    """Boolean adapter used by bridge-resume predicates."""
+
+    try:
+        validate_final_h3_prompt_contract(**kwargs)
+    except ApimartError:
+        return False
+    return True
+
+
 def temporal_anchor_h3_prompt(
     raw_prompt: str,
     reference_roles: Sequence[Mapping[str, Any]],

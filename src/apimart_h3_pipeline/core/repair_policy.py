@@ -55,7 +55,7 @@ REPAIR_ACTIONS = frozenset(
     }
 )
 
-REFERENCE_POLICIES = frozenset({"video_only", "one_anchor", "three_anchor"})
+REFERENCE_POLICIES = frozenset({"video_only", "one_anchor", "three_anchor", "qwen_decide"})
 # Semantic recovery is deliberately bounded to one retry per stage.  This is
 # part of the execution protocol, not a runtime experiment knob.
 STAGE_RETRY_LIMIT = 1
@@ -346,6 +346,7 @@ class FailureDiagnosisAndRepair:
             "repair_action": action,
             "repair_clause": clause,
             "repaired_h3_prompt": repaired_prompt,
+            "failed_prompt": failed,
             "reference_policy": reference_policy,
             "reference_image_count": reference_count,
             "reuse_primary_reference": reference_count in {1, 3},
@@ -365,15 +366,10 @@ class FailureDiagnosisAndRepair:
     def _reference_policy(action: str, original_policy: Mapping[str, Any]) -> tuple[str, int]:
         needs_reference = bool(original_policy.get("needs_reference_image"))
         original_count = int(original_policy.get("reference_image_count", 0) or 0)
-        if action == "strengthen_motion":
-            return "video_only", 0
-        if action == "use_three_anchor":
-            return "three_anchor", 3
-        if not needs_reference:
-            return "video_only", 0
-        if original_count == 3:
-            return "three_anchor", 3
-        return "one_anchor", 1
+        # Reference topology is a model decision during fallback. The
+        # sentinel count is resolved by the bridge after Qwen sees the raw
+        # requirement, failed prompt, evidence, source frames, and references.
+        return "qwen_decide", -1
 
     @staticmethod
     def _build_base_prompt(current: str, failed: str, clause: str, reference_count: int) -> str:
@@ -475,7 +471,7 @@ def validate_repair_record(
     reference_count = repair.get("reference_image_count")
     if not isinstance(reference_count, int) or isinstance(reference_count, bool):
         raise RepairValidationError("repair reference_image_count must be an integer")
-    expected_policy = "video_only" if reference_count == 0 else ("one_anchor" if reference_count == 1 else "three_anchor" if reference_count == 3 else "")
+    expected_policy = "qwen_decide" if reference_count == -1 else ("video_only" if reference_count == 0 else ("one_anchor" if reference_count == 1 else "three_anchor" if reference_count == 3 else ""))
     if reference_policy not in REFERENCE_POLICIES or reference_policy != expected_policy:
         raise RepairValidationError("repair reference policy/count mismatch")
     guard = repair.get("guard")
@@ -588,6 +584,7 @@ def _three_anchor_repair(
         "repair_action": "use_three_anchor",
         "repair_clause": clause,
         "repaired_h3_prompt": candidate,
+        "failed_prompt": failed,
         "reference_policy": "three_anchor",
         "reference_image_count": 3,
         "reuse_primary_reference": True,

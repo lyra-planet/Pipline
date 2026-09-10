@@ -214,3 +214,36 @@ def test_non_json_qwen_prompt_is_passed_through_without_rejection(tmp_path: Path
 
     assert result["h3_prompt"] == response_prompt
     assert result["repair_attempts"] == []
+
+
+def test_failure_repair_uses_dedicated_generator_prompt_with_failure_evidence(tmp_path: Path) -> None:
+    raw = "Replace the background with a kitchen."
+    captured: dict[str, object] = {}
+    refiner = object.__new__(DashScopeVisionRefiner)
+    refiner.model = "qwen-vl-max-test"
+
+    def complete(payload):
+        captured["payload"] = payload
+        return ("subject_definitions:\n<Video 1> source\n\nsummary:\n[video editing] The target video is an edited version of <Video 1>.\n\nretention_analysis:\n<Video 1> partially_preserved.\n\ndetailed_description:\nThe background must visibly change.", {"usage": {}})
+
+    refiner.complete = complete
+    refiner.compose_h3_prompt(
+        context_frames(tmp_path),
+        [],
+        raw,
+        False,
+        failure_observation="the background remained unchanged",
+        failed_h3_prompt="Change the scene.",
+        repair_action="strengthen_edit",
+        failure_type="edit_missing",
+    )
+
+    messages = captured["payload"]["messages"]
+    user_content = messages[1]["content"]
+    user_text = "\n".join(item.get("text", "") for item in user_content if isinstance(item, dict))
+    assert "Raw atomic requirement (authoritative)" in user_text
+    assert raw in user_text
+    assert "Change the scene." in user_text
+    assert "the background remained unchanged" in user_text
+    assert "edit_missing" in user_text
+    assert "same single repair obligation" in user_text
